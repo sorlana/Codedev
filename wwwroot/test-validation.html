@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Validation Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .test-result {
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+        .pass {
+            background: #d4edda;
+            color: #155724;
+        }
+        .fail {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <h1>Client-Side Validation Tests</h1>
+    
+    <div class="test-section">
+        <h2>Test 1: URL Validation</h2>
+        <div id="test1-result" class="test-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 2: Required Field Validation</h2>
+        <div id="test2-result" class="test-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 3: Provider Configuration Validation</h2>
+        <div id="test3-result" class="test-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 4: Local Configuration Validation</h2>
+        <div id="test4-result" class="test-result"></div>
+    </div>
+
+    <script>
+        // Copy validation functions from app.js
+        function validateUrl(url) {
+            if (!url || url.trim() === '') {
+                return false;
+            }
+            
+            try {
+                const urlObj = new URL(url);
+                return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function validateRequiredField(value) {
+            return value && value.trim() !== '';
+        }
+
+        // Test 1: URL Validation
+        function test1() {
+            const validUrls = [
+                'http://localhost:11434',
+                'https://api.openai.com',
+                'https://api.deepseek.com/v1'
+            ];
+            
+            const invalidUrls = [
+                '',
+                'not-a-url',
+                'htp://missing-t',
+                '://no-scheme',
+                'http://',
+                'just text'
+            ];
+            
+            let passed = true;
+            let details = [];
+            
+            validUrls.forEach(url => {
+                if (!validateUrl(url)) {
+                    passed = false;
+                    details.push(`Failed: "${url}" should be valid`);
+                }
+            });
+            
+            invalidUrls.forEach(url => {
+                if (validateUrl(url)) {
+                    passed = false;
+                    details.push(`Failed: "${url}" should be invalid`);
+                }
+            });
+            
+            const result = document.getElementById('test1-result');
+            result.className = 'test-result ' + (passed ? 'pass' : 'fail');
+            result.textContent = passed ? 'PASS: All URL validations correct' : 'FAIL: ' + details.join(', ');
+        }
+
+        // Test 2: Required Field Validation
+        function test2() {
+            const validFields = ['value', 'test', 'api-key-123'];
+            const invalidFields = ['', '   ', null, undefined];
+            
+            let passed = true;
+            let details = [];
+            
+            validFields.forEach(field => {
+                if (!validateRequiredField(field)) {
+                    passed = false;
+                    details.push(`Failed: "${field}" should be valid`);
+                }
+            });
+            
+            invalidFields.forEach(field => {
+                if (validateRequiredField(field)) {
+                    passed = false;
+                    details.push(`Failed: "${field}" should be invalid`);
+                }
+            });
+            
+            const result = document.getElementById('test2-result');
+            result.className = 'test-result ' + (passed ? 'pass' : 'fail');
+            result.textContent = passed ? 'PASS: All required field validations correct' : 'FAIL: ' + details.join(', ');
+        }
+
+        // Test 3: Provider Configuration Validation Logic
+        function test3() {
+            const testCases = [
+                { baseUrl: 'https://api.test.com', apiKey: 'key123', model: 'model1', expected: true },
+                { baseUrl: '', apiKey: 'key123', model: 'model1', expected: false },
+                { baseUrl: 'https://api.test.com', apiKey: '', model: 'model1', expected: false },
+                { baseUrl: 'https://api.test.com', apiKey: 'key123', model: '', expected: false },
+                { baseUrl: 'invalid-url', apiKey: 'key123', model: 'model1', expected: false }
+            ];
+            
+            let passed = true;
+            let details = [];
+            
+            testCases.forEach((testCase, index) => {
+                const isValid = validateRequiredField(testCase.baseUrl) && 
+                               validateUrl(testCase.baseUrl) &&
+                               validateRequiredField(testCase.apiKey) &&
+                               validateRequiredField(testCase.model);
+                
+                if (isValid !== testCase.expected) {
+                    passed = false;
+                    details.push(`Test case ${index + 1} failed`);
+                }
+            });
+            
+            const result = document.getElementById('test3-result');
+            result.className = 'test-result ' + (passed ? 'pass' : 'fail');
+            result.textContent = passed ? 'PASS: All provider validation logic correct' : 'FAIL: ' + details.join(', ');
+        }
+
+        // Test 4: Local Configuration Validation Logic
+        function test4() {
+            const testCases = [
+                { baseUrl: 'http://localhost:11434', model: 'llama2', expected: true },
+                { baseUrl: '', model: 'llama2', expected: false },
+                { baseUrl: 'http://localhost:11434', model: '', expected: false },
+                { baseUrl: 'invalid-url', model: 'llama2', expected: false }
+            ];
+            
+            let passed = true;
+            let details = [];
+            
+            testCases.forEach((testCase, index) => {
+                const isValid = validateRequiredField(testCase.baseUrl) && 
+                               validateUrl(testCase.baseUrl) &&
+                               validateRequiredField(testCase.model);
+                
+                if (isValid !== testCase.expected) {
+                    passed = false;
+                    details.push(`Test case ${index + 1} failed`);
+                }
+            });
+            
+            const result = document.getElementById('test4-result');
+            result.className = 'test-result ' + (passed ? 'pass' : 'fail');
+            result.textContent = passed ? 'PASS: All local validation logic correct' : 'FAIL: ' + details.join(', ');
+        }
+
+        // Run all tests
+        test1();
+        test2();
+        test3();
+        test4();
+    </script>
+</body>
+</html>

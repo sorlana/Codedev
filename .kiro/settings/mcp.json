@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "qdrant-mcp": {
+      "command": "node",
+      "args": [
+        "D:\\SITES\\My\\Qdrant_mcp\\qdrant-mcp-server\\build\\index.js"
+      ],
+      "env": {
+        "QDRANT_URL": "http://localhost:6333",
+        "EMBEDDING_BASE_URL": "http://localhost:11434",
+        "EMBEDDING_PROVIDER": "ollama",
+        "EMBEDDING_MODEL": "codellama:7b-instruct-q4_0"
+      },
+      "autoApprove": [
+        "index_codebase",
+        "get_collection_info",
+        "list_collections",
+        "delete_collection",
+        "clear_index"
+      ],
+      "disabledTools": []
+    },
+    "serena-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://localhost:32000/sse"
+      ],
+      "env": {},
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
