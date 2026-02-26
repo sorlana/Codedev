@@ -13,7 +13,10 @@ public class PromptProcessor : IPromptProcessor
     private readonly ISerenaService _serenaService;
     private readonly IDirectShellService _directShellService;
     private readonly IGitService _gitService;
+    private readonly Lazy<ITaskExecutorService> _taskExecutorService;
     private readonly ILogger<PromptProcessor> _logger;
+    private readonly CommandRecognizer _commandRecognizer;
+    private readonly TasksFilePathResolver _tasksFilePathResolver;
 
     public PromptProcessor(
         RefactoringDbContext dbContext,
@@ -21,14 +24,20 @@ public class PromptProcessor : IPromptProcessor
         ISerenaService serenaService,
         IDirectShellService directShellService,
         IGitService gitService,
-        ILogger<PromptProcessor> logger)
+        Lazy<ITaskExecutorService> taskExecutorService,
+        ILogger<PromptProcessor> logger,
+        CommandRecognizer commandRecognizer,
+        TasksFilePathResolver tasksFilePathResolver)
     {
         _dbContext = dbContext;
         _llmService = llmService;
         _serenaService = serenaService;
         _directShellService = directShellService;
         _gitService = gitService;
+        _taskExecutorService = taskExecutorService;
         _logger = logger;
+        _commandRecognizer = commandRecognizer;
+        _tasksFilePathResolver = tasksFilePathResolver;
     }
 
     public async Task<string> ProcessPromptAsync(int dialogueId, string prompt)
@@ -51,6 +60,28 @@ public class PromptProcessor : IPromptProcessor
         };
         _dbContext.Messages.Add(userMessage);
         await _dbContext.SaveChangesAsync();
+
+        // 3. Проверка на команду агентского режима
+        if (_commandRecognizer.TryRecognizeCommand(prompt, out var commandType, out var filePath))
+        {
+            _logger.LogInformation("Распознана команда агентского режима: {CommandType}, путь: {FilePath}", 
+                commandType, filePath ?? "(не указан)");
+            
+            var commandResult = await ExecuteAgentCommandAsync(dialogueId, commandType, filePath, dialogue.ProjectPath);
+            
+            // Сохраняем ответ ассистента
+            var assistantMessage = new Message
+            {
+                DialogueId = dialogueId,
+                Role = "assistant",
+                Content = commandResult,
+                Timestamp = DateTime.UtcNow
+            };
+            _dbContext.Messages.Add(assistantMessage);
+            await _dbContext.SaveChangesAsync();
+            
+            return commandResult;
+        }
 
         try
         {
@@ -239,6 +270,148 @@ Respond in Russian, but call tools with English parameters."
 
             throw;
         }
+    }
+
+    /// <summary>
+    /// Выполняет команду управления агентским режимом выполнения задач
+    /// </summary>
+    /// <param name="dialogueId">ID диалога</param>
+    /// <param name="commandType">Тип команды</param>
+    /// <param name="filePath">Путь к файлу tasks.md (может быть null)</param>
+    /// <param name="projectPath">Путь к проекту</param>
+    /// <returns>Сообщение с результатом выполнения команды</returns>
+    private async Task<string> ExecuteAgentCommandAsync(
+        int dialogueId,
+        AgentCommandType commandType,
+        string? filePath,
+        string projectPath)
+    {
+        try
+        {
+            var taskExecutor = _taskExecutorService.Value;
+            
+            switch (commandType)
+            {
+                case AgentCommandType.StartExecution:
+                    // Разрешаем путь к файлу tasks.md
+                    var resolvedPath = await _tasksFilePathResolver.ResolveTasksFilePathAsync(filePath, projectPath);
+                    
+                    _logger.LogInformation("Запуск выполнения задач из файла: {FilePath}", resolvedPath);
+                    
+                    // Запускаем выполнение задач
+                    var sessionId = await taskExecutor.ExecuteTasksAsync(dialogueId, resolvedPath);
+                    
+                    return $"✅ Запущено выполнение задач из файла {Path.GetFileName(resolvedPath)}\n\n" +
+                           $"Следите за прогрессом в сообщениях ниже. Вы можете остановить выполнение в любой момент.";
+
+                case AgentCommandType.StopExecution:
+                    _logger.LogInformation("Остановка выполнения задач для диалога {DialogueId}", dialogueId);
+                    
+                    await taskExecutor.StopExecutionAsync(dialogueId);
+                    
+                    return "⏸️ Выполнение задач остановлено.\n\n" +
+                           "Вы можете возобновить выполнение командой \"продолжи выполнение\".";
+
+                case AgentCommandType.ResumeExecution:
+                    _logger.LogInformation("Возобновление выполнения задач для диалога {DialogueId}", dialogueId);
+                    
+                    await taskExecutor.ResumeExecutionAsync(dialogueId);
+                    
+                    return "▶️ Продолжаю выполнение задач...\n\n" +
+                           "Следите за прогрессом в сообщениях ниже.";
+
+                case AgentCommandType.ShowStatus:
+                    _logger.LogInformation("Запрос статуса выполнения для диалога {DialogueId}", dialogueId);
+                    
+                    var status = await taskExecutor.GetExecutionStatusAsync(dialogueId);
+                    
+                    return FormatExecutionStatus(status);
+
+                default:
+                    return $"❌ Неизвестная команда: {commandType}";
+            }
+        }
+        catch (FileNotFoundException ex)
+        {
+            _logger.LogWarning(ex, "Файл не найден при выполнении команды {CommandType}", commandType);
+            return $"❌ {ex.Message}";
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Ошибка валидации при выполнении команды {CommandType}", commandType);
+            return $"❌ {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Ошибка при выполнении команды {CommandType}", commandType);
+            return $"❌ Ошибка выполнения команды: {ex.Message}\n\n" +
+                   "Попробуйте позже или обратитесь к администратору.";
+        }
+    }
+
+    /// <summary>
+    /// Форматирует статус выполнения задач в читаемый вид
+    /// </summary>
+    /// <param name="status">Статус выполнения</param>
+    /// <returns>Отформатированное сообщение со статусом</returns>
+    private string FormatExecutionStatus(ExecutionStatusDto status)
+    {
+        var statusEmoji = status.Status switch
+        {
+            "running" => "🔄",
+            "stopped" => "⏸️",
+            "completed" => "✅",
+            "failed" => "❌",
+            _ => "ℹ️"
+        };
+
+        var statusText = status.Status switch
+        {
+            "running" => "Выполняется",
+            "stopped" => "Приостановлено",
+            "completed" => "Завершено",
+            "failed" => "Ошибка",
+            "none" => "Нет активного выполнения",
+            _ => status.Status
+        };
+
+        var result = new StringBuilder();
+        result.AppendLine($"{statusEmoji} **Статус выполнения:** {statusText}");
+        result.AppendLine();
+
+        if (!string.IsNullOrEmpty(status.Progress))
+        {
+            result.AppendLine($"📊 **Прогресс:** {status.Progress}");
+        }
+
+        if (!string.IsNullOrEmpty(status.CurrentTask))
+        {
+            result.AppendLine($"📝 **Текущая задача:** {status.CurrentTask}");
+        }
+
+        if (status.StartedAt.HasValue)
+        {
+            result.AppendLine($"🕐 **Начало:** {status.StartedAt.Value:HH:mm:ss}");
+        }
+
+        if (status.CompletedAt.HasValue)
+        {
+            result.AppendLine($"🏁 **Завершение:** {status.CompletedAt.Value:HH:mm:ss}");
+            
+            if (status.StartedAt.HasValue)
+            {
+                var duration = status.CompletedAt.Value - status.StartedAt.Value;
+                result.AppendLine($"⏱️ **Длительность:** {duration:hh\\:mm\\:ss}");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(status.ErrorMessage))
+        {
+            result.AppendLine();
+            result.AppendLine($"❌ **Ошибка:** {status.ErrorMessage}");
+        }
+
+        return result.ToString().Trim();
     }
 
     private async Task<string> ExecuteFunctionCallAsync(FunctionCall functionCall, string projectPath)

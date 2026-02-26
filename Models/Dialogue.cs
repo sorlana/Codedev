@@ -7,4 +7,5 @@ public class Dialogue
     public DateTime CreatedAt { get; set; }
     public List<Message> Messages { get; set; } = new();
     public List<Checkpoint> Checkpoints { get; set; } = new();
+    public List<ExecutionSession> ExecutionSessions { get; set; } = new();
 }

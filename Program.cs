@@ -42,6 +42,38 @@ if (args.Length > 0 && args[0] == "test-startup")
     return;
 }
 
+if (args.Length > 0 && args[0] == "test-taskexecutor")
+{
+    await TaskExecutorManualTests.Main(args);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "test-integration")
+{
+    var integrationTest = new TaskExecutorIntegrationTests();
+    var success = await integrationTest.RunFullIntegrationTestAsync();
+    Environment.Exit(success ? 0 : 1);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "test-commandrecognizer")
+{
+    CommandRecognizerTests.RunAllTests();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "test-taskspathresolver")
+{
+    await TasksFilePathResolverTests.RunAllTests();
+    return;
+}
+
+if (args.Length > 0 && args[0] == "test-agentcommands")
+{
+    await AgentCommandIntegrationTests.RunAllTests();
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Настройка JSON сериализации для обработки циклических ссылок
@@ -71,6 +103,15 @@ builder.Services.AddScoped<ILlmService>(sp =>
     return factory.CreateLlmService();
 });
 builder.Services.AddScoped<IPromptProcessor, PromptProcessor>();
+builder.Services.AddScoped<ITaskExecutorService, TaskExecutorService>();
+
+// Регистрация Lazy<ITaskExecutorService> для разрешения циклической зависимости
+builder.Services.AddScoped<Lazy<ITaskExecutorService>>(sp => 
+    new Lazy<ITaskExecutorService>(() => sp.GetRequiredService<ITaskExecutorService>()));
+
+// Регистрация компонентов для агентского режима
+builder.Services.AddSingleton<CommandRecognizer>();
+builder.Services.AddScoped<TasksFilePathResolver>();
 
 // Add CORS
 builder.Services.AddCors(options =>
@@ -676,6 +717,85 @@ app.MapGet("/api/startup/validate", async (IStartupValidationService validationS
 {
     var result = await validationService.ValidateModelConnectionAsync();
     return Results.Ok(result);
+});
+
+// Task execution endpoints
+app.MapPost("/api/dialogues/{id}/execute-tasks", async (
+    int id,
+    ExecuteTasksRequest request,
+    ITaskExecutorService taskExecutorService,
+    RefactoringDbContext dbContext) =>
+{
+    try
+    {
+        var sessionId = await taskExecutorService.ExecuteTasksAsync(id, request.TasksFilePath, request.SkipOptional);
+        return Results.Accepted($"/api/dialogues/{id}/execution-status", new { sessionId });
+    }
+    catch (ArgumentException ex) when (ex.Message.Contains("Dialogue not found"))
+    {
+        return Results.NotFound(new { message = ex.Message });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Error starting task execution");
+        return Results.Problem(ex.Message);
+    }
+});
+
+app.MapPost("/api/dialogues/{id}/stop-execution", async (
+    int id,
+    ITaskExecutorService taskExecutorService) =>
+{
+    try
+    {
+        await taskExecutorService.StopExecutionAsync(id);
+        return Results.Ok(new { message = "Execution stopped" });
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Error stopping task execution");
+        return Results.Problem(ex.Message);
+    }
+});
+
+app.MapPost("/api/dialogues/{id}/resume-execution", async (
+    int id,
+    ITaskExecutorService taskExecutorService) =>
+{
+    try
+    {
+        await taskExecutorService.ResumeExecutionAsync(id);
+        return Results.Accepted($"/api/dialogues/{id}/execution-status", new { message = "Execution resumed" });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Error resuming task execution");
+        return Results.Problem(ex.Message);
+    }
+});
+
+app.MapGet("/api/dialogues/{id}/execution-status", async (
+    int id,
+    ITaskExecutorService taskExecutorService) =>
+{
+    try
+    {
+        var status = await taskExecutorService.GetExecutionStatusAsync(id);
+        return Results.Ok(status);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Error getting execution status");
+        return Results.Problem(ex.Message);
+    }
 });
 
 // Remove the root endpoint - let static files handle it

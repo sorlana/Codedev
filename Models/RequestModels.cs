@@ -9,3 +9,22 @@ public record RollbackRequest(int CheckpointId);
 public record AddProjectRequest(string ProjectPath);
 
 public record CreateCheckpointRequest(string? Description);
+public record ExecuteTasksRequest(string TasksFilePath, bool SkipOptional = true);
+
+public enum AgentCommandType
+{
+    StartExecution,
+    StopExecution,
+    ResumeExecution,
+    ShowStatus
+}
+
+public class ExecutionStatusDto
+{
+    public string Status { get; set; } = string.Empty;
+    public string? Progress { get; set; }
+    public string? CurrentTask { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+}

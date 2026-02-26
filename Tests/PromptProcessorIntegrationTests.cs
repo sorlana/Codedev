@@ -63,6 +63,13 @@ public class PromptProcessorIntegrationTests
         var serenaService = new MockSerenaService();
         var directShellService = new MockDirectShellService();
         var gitService = new MockGitService();
+        var taskExecutorService = new Lazy<ITaskExecutorService>(() => new MockTaskExecutorService());
+        
+        var pathValidatorLogger = loggerFactory.CreateLogger<PathValidator>();
+        var pathValidator = new PathValidator(configuration, pathValidatorLogger);
+        var tasksFilePathResolverLogger = loggerFactory.CreateLogger<TasksFilePathResolver>();
+        var commandRecognizer = new CommandRecognizer();
+        var tasksFilePathResolver = new TasksFilePathResolver(pathValidator, tasksFilePathResolverLogger);
 
         // Act - Create PromptProcessor with factory-created service
         var promptProcessor = new PromptProcessor(
@@ -71,7 +78,10 @@ public class PromptProcessorIntegrationTests
             serenaService,
             directShellService,
             gitService,
-            promptProcessorLogger
+            taskExecutorService,
+            promptProcessorLogger,
+            commandRecognizer,
+            tasksFilePathResolver
         );
 
         // Assert
@@ -203,13 +213,22 @@ public class PromptProcessorIntegrationTests
             .Options;
         var dbContext1 = new RefactoringDbContext(dbOptions1);
         
+        var pathValidatorLogger1 = loggerFactory.CreateLogger<PathValidator>();
+        var pathValidator1 = new PathValidator(openAiConfig, pathValidatorLogger1);
+        var tasksFilePathResolverLogger1 = loggerFactory.CreateLogger<TasksFilePathResolver>();
+        var commandRecognizer1 = new CommandRecognizer();
+        var tasksFilePathResolver1 = new TasksFilePathResolver(pathValidator1, tasksFilePathResolverLogger1);
+        
         var promptProcessor1 = new PromptProcessor(
             dbContext1,
             openAiService,
             new MockSerenaService(),
             new MockDirectShellService(),
             new MockGitService(),
-            promptProcessorLogger
+            new Lazy<ITaskExecutorService>(() => new MockTaskExecutorService()),
+            promptProcessorLogger,
+            commandRecognizer1,
+            tasksFilePathResolver1
         );
 
         if (promptProcessor1 == null)
@@ -238,13 +257,22 @@ public class PromptProcessorIntegrationTests
             .Options;
         var dbContext2 = new RefactoringDbContext(dbOptions2);
         
+        var pathValidatorLogger2 = loggerFactory.CreateLogger<PathValidator>();
+        var pathValidator2 = new PathValidator(ollamaConfig, pathValidatorLogger2);
+        var tasksFilePathResolverLogger2 = loggerFactory.CreateLogger<TasksFilePathResolver>();
+        var commandRecognizer2 = new CommandRecognizer();
+        var tasksFilePathResolver2 = new TasksFilePathResolver(pathValidator2, tasksFilePathResolverLogger2);
+        
         var promptProcessor2 = new PromptProcessor(
             dbContext2,
             ollamaService,
             new MockSerenaService(),
             new MockDirectShellService(),
             new MockGitService(),
-            promptProcessorLogger
+            new Lazy<ITaskExecutorService>(() => new MockTaskExecutorService()),
+            promptProcessorLogger,
+            commandRecognizer2,
+            tasksFilePathResolver2
         );
 
         if (promptProcessor2 == null)
@@ -435,5 +463,39 @@ public class MockDirectShellService : IDirectShellService
     public Task<string> ReadFileAsync(string filePath, string workingDirectory)
     {
         return Task.FromResult($"File content: {filePath}");
+    }
+}
+
+/// <summary>
+/// Mock implementation of ITaskExecutorService for testing
+/// </summary>
+public class MockTaskExecutorService : ITaskExecutorService
+{
+    public Task<int> ExecuteTasksAsync(int dialogueId, string tasksFilePath, bool skipOptional = true)
+    {
+        return Task.FromResult(1); // Возвращаем mock ID сессии
+    }
+
+    public Task StopExecutionAsync(int dialogueId)
+    {
+        return Task.CompletedTask;
+    }
+
+    public Task ResumeExecutionAsync(int dialogueId)
+    {
+        return Task.CompletedTask;
+    }
+
+    public Task<ExecutionStatusDto> GetExecutionStatusAsync(int dialogueId)
+    {
+        return Task.FromResult(new ExecutionStatusDto
+        {
+            Status = "none",
+            Progress = null,
+            CurrentTask = null,
+            ErrorMessage = null,
+            StartedAt = null,
+            CompletedAt = null
+        });
     }
 }

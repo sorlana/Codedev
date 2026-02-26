@@ -4,6 +4,10 @@ let currentDialogueId = null;
 let isProcessing = false;
 let projects = [];
 
+// Глобальные переменные для управления агентским режимом выполнения
+let executionPollingInterval = null;
+let currentExecutionStatus = 'none';
+
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     validateModelConnection();
@@ -146,6 +150,9 @@ function setupEventListeners() {
             sendMessage();
         }
     });
+    
+    // Настройка кнопок управления выполнением
+    setupExecutionControlButtons();
     
     // Model configuration modal
     document.getElementById('open-config-button').addEventListener('click', openConfigModal);
@@ -295,6 +302,9 @@ async function deleteDialogue(event, dialogueId) {
 }
 
 async function selectDialogue(dialogueId) {
+    // Остановка polling предыдущего диалога
+    stopPollingExecutionStatus();
+    
     currentDialogueId = dialogueId;
     
     // Update active state
@@ -304,6 +314,25 @@ async function selectDialogue(dialogueId) {
     
     await loadMessages(dialogueId);
     await loadCheckpoints(dialogueId);
+    
+    // Проверка статуса выполнения нового диалога
+    try {
+        const response = await fetch(
+            `${API_BASE}/api/dialogues/${dialogueId}/execution-status`
+        );
+        
+        if (response.ok) {
+            const status = await response.json();
+            updateExecutionUI(status);
+            
+            // Запуск polling если выполнение активно
+            if (status.status === 'running') {
+                startPollingExecutionStatus();
+            }
+        }
+    } catch (error) {
+        console.error('Error checking execution status:', error);
+    }
 }
 
 async function loadMessages(dialogueId) {
@@ -447,6 +476,16 @@ async function sendMessage() {
         if (!response.ok) {
             const error = await response.text();
             throw new Error(error);
+        }
+        
+        // Проверка на команду запуска выполнения задач
+        const contentLower = content.toLowerCase();
+        if (contentLower.includes('начни выполнение') || 
+            contentLower.includes('запусти выполнение') ||
+            contentLower.includes('start execution') ||
+            contentLower.includes('execute tasks')) {
+            // Запуск polling для отслеживания статуса выполнения
+            startPollingExecutionStatus();
         }
         
         input.value = '';
@@ -1097,4 +1136,245 @@ async function testLocalConnection() {
         testButton.disabled = false;
         testButton.textContent = 'Test Connection';
     }
+}
+
+// Функции управления агентским режимом выполнения задач
+
+// Настройка кнопок управления выполнением
+function setupExecutionControlButtons() {
+    const stopButton = document.getElementById('stop-execution-btn');
+    const resumeButton = document.getElementById('resume-execution-btn');
+    
+    if (stopButton) {
+        stopButton.addEventListener('click', stopExecution);
+    }
+    
+    if (resumeButton) {
+        resumeButton.addEventListener('click', resumeExecution);
+    }
+}
+
+// Остановка выполнения задач
+async function stopExecution() {
+    if (!currentDialogueId) {
+        return;
+    }
+    
+    try {
+        const stopButton = document.getElementById('stop-execution-btn');
+        stopButton.disabled = true;
+        stopButton.textContent = 'Останавливаю...';
+        
+        // Отправка команды через sendMessage
+        const input = document.getElementById('prompt-input');
+        input.value = 'останови выполнение';
+        await sendMessage();
+        
+    } catch (error) {
+        console.error('Error stopping execution:', error);
+        showStatusMessage('Ошибка остановки выполнения', 'error');
+    } finally {
+        const stopButton = document.getElementById('stop-execution-btn');
+        stopButton.disabled = false;
+        stopButton.textContent = 'Остановить';
+    }
+}
+
+// Возобновление выполнения задач
+async function resumeExecution() {
+    if (!currentDialogueId) {
+        return;
+    }
+    
+    try {
+        const resumeButton = document.getElementById('resume-execution-btn');
+        resumeButton.disabled = true;
+        resumeButton.textContent = 'Возобновляю...';
+        
+        // Отправка команды через sendMessage
+        const input = document.getElementById('prompt-input');
+        input.value = 'продолжи выполнение';
+        await sendMessage();
+        
+        // Запуск polling после возобновления
+        startPollingExecutionStatus();
+        
+    } catch (error) {
+        console.error('Error resuming execution:', error);
+        showStatusMessage('Ошибка возобновления выполнения', 'error');
+    } finally {
+        const resumeButton = document.getElementById('resume-execution-btn');
+        resumeButton.disabled = false;
+        resumeButton.textContent = 'Возобновить';
+    }
+}
+
+// Polling статуса выполнения
+async function pollExecutionStatus() {
+    // Проверка наличия currentDialogueId
+    if (!currentDialogueId) {
+        stopPollingExecutionStatus();
+        return;
+    }
+    
+    try {
+        // Вызов GET /api/dialogues/{id}/execution-status
+        const response = await fetch(
+            `${API_BASE}/api/dialogues/${currentDialogueId}/execution-status`
+        );
+        
+        // Обработка ошибки 404 - остановка polling
+        if (response.status === 404) {
+            console.error('Dialogue not found (404), stopping polling');
+            stopPollingExecutionStatus();
+            return;
+        }
+        
+        if (!response.ok) {
+            console.error('Failed to fetch execution status:', response.status);
+            // Продолжаем polling несмотря на ошибку (кроме 404)
+            return;
+        }
+        
+        const status = await response.json();
+        
+        // Обновление UI через updateExecutionUI
+        updateExecutionUI(status);
+        
+        // Загрузка новых сообщений через loadMessages
+        await loadMessages(currentDialogueId);
+        
+        // Остановка polling если status завершен
+        if (status.status === 'completed' || 
+            status.status === 'failed' || 
+            status.status === 'none') {
+            stopPollingExecutionStatus();
+        }
+        
+    } catch (error) {
+        // Обработка ошибок сети - логирование, продолжение polling
+        console.error('Network error polling execution status:', error);
+        // Не останавливаем polling - возможно временная проблема
+    }
+}
+
+// Запуск polling статуса выполнения
+function startPollingExecutionStatus() {
+    // Проверка на уже запущенный polling
+    if (executionPollingInterval) {
+        return;
+    }
+    
+    // Создание interval с интервалом 2000ms
+    executionPollingInterval = setInterval(pollExecutionStatus, 2000);
+    
+    // Немедленный первый вызов
+    pollExecutionStatus();
+}
+
+// Остановка polling статуса выполнения
+function stopPollingExecutionStatus() {
+    if (executionPollingInterval) {
+        clearInterval(executionPollingInterval);
+        executionPollingInterval = null;
+    }
+}
+
+// Обновление UI на основе статуса выполнения
+function updateExecutionUI(status) {
+    currentExecutionStatus = status.status;
+    
+    // Обновление кнопок управления
+    updateControlButtons(status.status);
+    
+    // Обновление индикатора прогресса
+    updateStatusIndicator(status);
+}
+
+// Обновление кнопок управления
+function updateControlButtons(status) {
+    const stopButton = document.getElementById('stop-execution-btn');
+    const resumeButton = document.getElementById('resume-execution-btn');
+    const controlsContainer = document.getElementById('execution-controls');
+    
+    if (!stopButton || !resumeButton || !controlsContainer) {
+        return;
+    }
+    
+    // Скрыть контейнер если status="none" или "completed"
+    if (status === 'none' || status === 'completed') {
+        controlsContainer.style.display = 'none';
+        return;
+    }
+    
+    // Показать контейнер для других статусов
+    controlsContainer.style.display = 'flex';
+    
+    // Управление видимостью кнопок
+    if (status === 'running') {
+        stopButton.style.display = 'inline-block';
+        resumeButton.style.display = 'none';
+    } else if (status === 'stopped' || status === 'failed') {
+        stopButton.style.display = 'none';
+        resumeButton.style.display = 'inline-block';
+    }
+}
+
+// Обновление индикатора статуса
+function updateStatusIndicator(status) {
+    const indicator = document.getElementById('execution-status-indicator');
+    
+    if (!indicator) {
+        return;
+    }
+    
+    // Скрыть если нет активного выполнения
+    if (status.status === 'none') {
+        indicator.style.display = 'none';
+        return;
+    }
+    
+    indicator.style.display = 'block';
+    
+    // Формирование текста индикатора
+    let statusText = '';
+    let statusEmoji = '';
+    
+    switch (status.status) {
+        case 'running':
+            statusEmoji = '🔄';
+            statusText = 'Выполняется...';
+            break;
+        case 'stopped':
+            statusEmoji = '⏸️';
+            statusText = 'Приостановлено';
+            break;
+        case 'completed':
+            statusEmoji = '✅';
+            statusText = 'Завершено';
+            break;
+        case 'failed':
+            statusEmoji = '❌';
+            statusText = 'Ошибка';
+            break;
+    }
+    
+    // Добавление прогресса
+    let progressText = '';
+    if (status.progress) {
+        progressText = ` (${status.progress})`;
+    }
+    
+    // Добавление текущей задачи
+    let currentTaskText = '';
+    if (status.currentTask) {
+        const truncated = status.currentTask.substring(0, 50);
+        currentTaskText = `<br><small>${truncated}${status.currentTask.length > 50 ? '...' : ''}</small>`;
+    }
+    
+    indicator.innerHTML = `
+        <span class="status-emoji">${statusEmoji}</span>
+        <span class="status-text">${statusText}${progressText}</span>
+        ${currentTaskText}
+    `;
 }

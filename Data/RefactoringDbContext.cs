@@ -14,6 +14,7 @@ public class RefactoringDbContext : DbContext
     public DbSet<Message> Messages { get; set; }
     public DbSet<Checkpoint> Checkpoints { get; set; }
     public DbSet<Project> Projects { get; set; }
+    public DbSet<ExecutionSession> ExecutionSessions { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -31,6 +32,13 @@ public class RefactoringDbContext : DbContext
             .HasOne(c => c.Dialogue)
             .WithMany(d => d.Checkpoints)
             .HasForeignKey(c => c.DialogueId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Configure ExecutionSession relationship
+        modelBuilder.Entity<ExecutionSession>()
+            .HasOne(e => e.Dialogue)
+            .WithMany(d => d.ExecutionSessions)
+            .HasForeignKey(e => e.DialogueId)
             .OnDelete(DeleteBehavior.Cascade);
 
         // Configure Project entity

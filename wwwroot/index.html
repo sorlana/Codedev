@@ -454,8 +454,14 @@
             padding: 20px;
             border-radius: 8px;
             display: flex;
-            gap: 10px;
+            flex-direction: column;
+            gap: 0;
             flex-shrink: 0;
+        }
+
+        #message-input-row {
+            display: flex;
+            gap: 10px;
         }
 
         #prompt-input {
@@ -798,6 +804,99 @@
         .form-group select.invalid {
             border-color: #dc3545;
         }
+
+        /* Индикатор статуса выполнения */
+        #execution-status-indicator {
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+        }
+
+        .status-emoji {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .status-text {
+            font-weight: 500;
+            color: #333;
+            flex: 1;
+        }
+
+        #execution-status-indicator small {
+            color: #666;
+            font-size: 12px;
+            display: block;
+            margin-top: 4px;
+        }
+
+        /* Кнопки управления выполнением */
+        #execution-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+            width: 100%;
+        }
+
+        .execution-control-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+            font-size: 14px;
+        }
+
+        #stop-execution-btn {
+            background: #dc3545;
+            color: white;
+        }
+
+        #stop-execution-btn:hover {
+            background: #c82333;
+        }
+
+        #stop-execution-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        #resume-execution-btn {
+            background: #28a745;
+            color: white;
+        }
+
+        #resume-execution-btn:hover {
+            background: #218838;
+        }
+
+        #resume-execution-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        /* Стили для сообщений о прогрессе */
+        .message.assistant.progress {
+            background: #e7f3ff;
+            border-left: 4px solid #007bff;
+        }
+
+        .message.assistant.error {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+        }
+
+        .message.assistant.success {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+        }
     </style>
 </head>
 <body>
@@ -830,8 +929,26 @@
             <div id="dialogue-view">
                 <div id="message-list"></div>
                 <div id="message-input-container">
-                    <input type="text" id="prompt-input" placeholder="Введите команду для вашего проекта (например: Покажи файл Program.cs)...">
-                    <button id="send-button">Отправить</button>
+                    <!-- Индикатор статуса выполнения -->
+                    <div id="execution-status-indicator" style="display: none;">
+                        <span class="status-emoji"></span>
+                        <span class="status-text"></span>
+                    </div>
+                    
+                    <!-- Кнопки управления выполнением -->
+                    <div id="execution-controls" style="display: none;">
+                        <button id="stop-execution-btn" class="execution-control-btn">
+                            Остановить
+                        </button>
+                        <button id="resume-execution-btn" class="execution-control-btn" style="display: none;">
+                            Возобновить
+                        </button>
+                    </div>
+                    
+                    <div id="message-input-row">
+                        <input type="text" id="prompt-input" placeholder="Введите команду для вашего проекта (например: Покажи файл Program.cs)...">
+                        <button id="send-button">Отправить</button>
+                    </div>
                 </div>
             </div>
         </div>
