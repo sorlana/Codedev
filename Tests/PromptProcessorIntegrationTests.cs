@@ -61,6 +61,7 @@ public class PromptProcessorIntegrationTests
         var dbContext = new RefactoringDbContext(dbOptions);
         
         var serenaService = new MockSerenaService();
+        var directShellService = new MockDirectShellService();
         var gitService = new MockGitService();
 
         // Act - Create PromptProcessor with factory-created service
@@ -68,6 +69,7 @@ public class PromptProcessorIntegrationTests
             dbContext,
             llmService,
             serenaService,
+            directShellService,
             gitService,
             promptProcessorLogger
         );
@@ -205,6 +207,7 @@ public class PromptProcessorIntegrationTests
             dbContext1,
             openAiService,
             new MockSerenaService(),
+            new MockDirectShellService(),
             new MockGitService(),
             promptProcessorLogger
         );
@@ -239,6 +242,7 @@ public class PromptProcessorIntegrationTests
             dbContext2,
             ollamaService,
             new MockSerenaService(),
+            new MockDirectShellService(),
             new MockGitService(),
             promptProcessorLogger
         );
@@ -415,5 +419,21 @@ public class MockSerenaService : ISerenaService
     public Task<string> DeleteLinesAsync(string filePath, int startLine, int endLine)
     {
         return Task.FromResult($"Deleted lines {startLine}-{endLine} in {filePath}");
+    }
+}
+
+/// <summary>
+/// Mock implementation of IDirectShellService for testing
+/// </summary>
+public class MockDirectShellService : IDirectShellService
+{
+    public Task<string> ExecuteCommandAsync(string command, string workingDirectory)
+    {
+        return Task.FromResult($"Executed command: {command}");
+    }
+
+    public Task<string> ReadFileAsync(string filePath, string workingDirectory)
+    {
+        return Task.FromResult($"File content: {filePath}");
     }
 }

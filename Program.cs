@@ -36,7 +36,19 @@ if (args.Length > 0 && args[0] == "test-promptprocessor")
     return;
 }
 
+if (args.Length > 0 && args[0] == "test-startup")
+{
+    await StartupValidationServiceTests.Main(args);
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
+
+// Настройка JSON сериализации для обработки циклических ссылок
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+});
 
 // Add DbContext
 builder.Services.AddDbContext<RefactoringDbContext>(options =>
@@ -46,9 +58,12 @@ builder.Services.AddDbContext<RefactoringDbContext>(options =>
 builder.Services.AddSingleton<IMcpClient, McpClient>();
 builder.Services.AddScoped<IGitService, GitService>();
 builder.Services.AddScoped<ISerenaService, SerenaService>();
+builder.Services.AddScoped<IDirectShellService, DirectShellService>();
 builder.Services.AddScoped<PathValidator>();
 builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
 builder.Services.AddSingleton<ILlmServiceFactory, LlmServiceFactory>();
+builder.Services.AddScoped<IStartupValidationService, StartupValidationService>();
+builder.Services.AddScoped<IProjectManagementService, ProjectManagementService>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<ILlmService>(sp =>
 {
@@ -214,6 +229,44 @@ app.MapGet("/api/dialogues/{id}/checkpoints", async (
         .ToListAsync();
 
     return Results.Ok(checkpoints);
+});
+
+app.MapPost("/api/dialogues/{id}/checkpoints", async (
+    int id,
+    CreateCheckpointRequest request,
+    RefactoringDbContext dbContext,
+    IGitService gitService) =>
+{
+    var dialogue = await dbContext.Dialogues.FindAsync(id);
+    if (dialogue == null)
+        return Results.NotFound(new { message = "Dialogue not found" });
+
+    try
+    {
+        // Создаем чекпойнт
+        var description = request.Description ?? "Manual checkpoint";
+        var commitHash = await gitService.CreateCheckpointAsync(
+            dialogue.ProjectPath,
+            description);
+
+        var checkpoint = new Checkpoint
+        {
+            DialogueId = id,
+            Description = description,
+            CommitHash = commitHash,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        dbContext.Checkpoints.Add(checkpoint);
+        await dbContext.SaveChangesAsync();
+
+        return Results.Ok(checkpoint);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Error creating checkpoint");
+        return Results.Problem(ex.Message);
+    }
 });
 
 app.MapPost("/api/dialogues/{id}/rollback", async (
@@ -554,6 +607,75 @@ app.MapPost("/api/configuration/test", async (
             Message = $"Unexpected error: {ex.Message}"
         });
     }
+});
+
+// Project management endpoints
+app.MapGet("/api/projects", async (IProjectManagementService projectService) =>
+{
+    var projects = await projectService.GetAllProjectsAsync();
+    return Results.Ok(projects);
+});
+
+app.MapGet("/api/projects/selected", async (IProjectManagementService projectService) =>
+{
+    var project = await projectService.GetSelectedProjectAsync();
+    return project != null ? Results.Ok(project) : Results.NotFound();
+});
+
+app.MapPost("/api/projects", async (
+    AddProjectRequest request,
+    IProjectManagementService projectService) =>
+{
+    try
+    {
+        var project = await projectService.AddProjectAsync(request.ProjectPath);
+        return Results.Ok(project);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+});
+
+app.MapDelete("/api/projects/{id}", async (
+    int id,
+    IProjectManagementService projectService) =>
+{
+    try
+    {
+        await projectService.DeleteProjectAsync(id);
+        return Results.Ok(new { message = "Проект удален" });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.NotFound(new { message = ex.Message });
+    }
+});
+
+app.MapPost("/api/projects/{id}/select", async (
+    int id,
+    IProjectManagementService projectService) =>
+{
+    try
+    {
+        await projectService.SelectProjectAsync(id);
+        return Results.Ok(new { message = "Проект выбран" });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.NotFound(new { message = ex.Message });
+    }
+});
+
+// Startup validation endpoint
+app.MapGet("/api/startup/validate", async (IStartupValidationService validationService) =>
+{
+    var result = await validationService.ValidateModelConnectionAsync();
+    return Results.Ok(result);
 });
 
 // Remove the root endpoint - let static files handle it

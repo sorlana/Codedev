@@ -29,6 +29,12 @@ public class OllamaLlmService : ILlmService
     {
         try
         {
+            _logger.LogInformation("=== Ollama Request Start ===");
+            _logger.LogInformation("Model: {Model}", _model);
+            _logger.LogInformation("Prompt: {Prompt}", prompt);
+            _logger.LogInformation("History count: {Count}", history.Count);
+            _logger.LogInformation("Tools count: {Count}", tools.Count);
+            
             // Build messages array
             var messages = new List<object>();
             
@@ -69,20 +75,29 @@ public class OllamaLlmService : ILlmService
             {
                 DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
             });
-            var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+            
+            _logger.LogInformation("Request JSON length: {Length}", requestJson.Length);
+            _logger.LogDebug("Request JSON: {Json}", requestJson);
+            
+            var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
             _httpClient.DefaultRequestHeaders.Clear();
 
-            var response = await _httpClient.PostAsync($"{_baseUrl}/api/chat", content);
+            var response = await _httpClient.PostAsync($"{_baseUrl}/api/chat", requestContent);
+            
+            _logger.LogInformation("Response status: {StatusCode}", response.StatusCode);
             
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
                 _logger.LogError("Ollama API error: {StatusCode} - {Error}", response.StatusCode, errorContent);
-                throw new LlmException($"Ollama API error: {response.StatusCode}");
+                throw new LlmException($"Ollama API error: {response.StatusCode} - {errorContent}");
             }
 
             var responseJson = await response.Content.ReadAsStringAsync();
+            _logger.LogInformation("Ollama response received, length: {Length}", responseJson.Length);
+            _logger.LogDebug("Response JSON: {Json}", responseJson);
+            
             var responseData = JsonSerializer.Deserialize<JsonElement>(responseJson);
 
             var llmResponse = new LlmResponse();
@@ -90,9 +105,22 @@ public class OllamaLlmService : ILlmService
             // Parse Ollama response
             if (responseData.TryGetProperty("message", out var message))
             {
-                // Check for tool calls
+                // DeepSeek-R1 может возвращать и текст (рассуждения), и tool calls одновременно
+                // Сначала извлекаем текстовое содержимое
+                if (message.TryGetProperty("content", out var contentProp))
+                {
+                    var content = contentProp.GetString();
+                    if (!string.IsNullOrWhiteSpace(content))
+                    {
+                        llmResponse.TextContent = content;
+                        _logger.LogInformation("Response has text content, length: {Length}", content.Length);
+                    }
+                }
+
+                // Затем проверяем наличие tool calls
                 if (message.TryGetProperty("tool_calls", out var toolCalls) && toolCalls.GetArrayLength() > 0)
                 {
+                    _logger.LogInformation("Found {Count} tool calls in response", toolCalls.GetArrayLength());
                     llmResponse.FunctionCalls = new List<FunctionCall>();
                     
                     foreach (var toolCall in toolCalls.EnumerateArray())
@@ -100,12 +128,15 @@ public class OllamaLlmService : ILlmService
                         var function = toolCall.GetProperty("function");
                         var functionName = function.GetProperty("name").GetString() ?? string.Empty;
                         
+                        _logger.LogInformation("Parsing tool call: {FunctionName}", functionName);
+                        
                         // Ollama returns arguments as an object, not a JSON string
                         var arguments = new Dictionary<string, object>();
                         if (function.TryGetProperty("arguments", out var argsElement))
                         {
                             arguments = JsonSerializer.Deserialize<Dictionary<string, object>>(argsElement.GetRawText())
                                 ?? new Dictionary<string, object>();
+                            _logger.LogInformation("Parsed {Count} arguments for {FunctionName}", arguments.Count, functionName);
                         }
 
                         llmResponse.FunctionCalls.Add(new FunctionCall
@@ -115,13 +146,13 @@ public class OllamaLlmService : ILlmService
                         });
                     }
                 }
-                // Check for text content
-                else if (message.TryGetProperty("content", out var contentProp))
-                {
-                    llmResponse.TextContent = contentProp.GetString();
-                }
+            }
+            else
+            {
+                _logger.LogWarning("Response does not contain 'message' property");
             }
 
+            _logger.LogInformation("=== Ollama Request End ===");
             return llmResponse;
         }
         catch (Exception ex) when (ex is not LlmException)

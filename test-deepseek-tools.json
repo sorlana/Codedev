@@ -1,0 +1,29 @@
+{
+  "model": "deepseek-r1:7b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Создай файл test.txt"
+    }
+  ],
+  "stream": false,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "execute_shell_command",
+        "description": "Execute a shell command",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "The command to execute"
+            }
+          },
+          "required": ["command"]
+        }
+      }
+    }
+  ]
+}

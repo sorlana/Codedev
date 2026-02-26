@@ -1,0 +1,10 @@
+{
+  "model": "deepseek-r1:7b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello, how are you?"
+    }
+  ],
+  "stream": false
+}

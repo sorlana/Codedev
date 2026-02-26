@@ -2,26 +2,139 @@ const API_BASE = '';
 
 let currentDialogueId = null;
 let isProcessing = false;
+let projects = [];
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
+    validateModelConnection();
+    loadProjects();
     loadDialogues();
     setupEventListeners();
-    loadSavedProjectPath();
 });
 
-function loadSavedProjectPath() {
-    const savedPath = localStorage.getItem('lastProjectPath');
-    if (savedPath) {
-        document.getElementById('project-path-input').value = savedPath;
+// Project Management Functions
+
+async function loadProjects() {
+    try {
+        const response = await fetch(`${API_BASE}/api/projects`);
+        projects = await response.json();
+        
+        updateProjectSelector();
+    } catch (error) {
+        console.error('Error loading projects:', error);
     }
 }
 
-function clearProjectPath() {
-    const input = document.getElementById('project-path-input');
-    input.value = '';
-    input.focus();
-    localStorage.removeItem('lastProjectPath');
+function updateProjectSelector() {
+    const selector = document.getElementById('project-selector');
+    
+    if (projects.length === 0) {
+        selector.innerHTML = '<option value="">Нет проектов</option>';
+        return;
+    }
+    
+    selector.innerHTML = projects.map(p => `
+        <option value="${p.id}" ${p.isSelected ? 'selected' : ''}>
+            ${escapeHtml(p.name)}
+        </option>
+    `).join('');
+}
+
+async function selectProject(projectId) {
+    if (!projectId) return;
+    
+    try {
+        await fetch(`${API_BASE}/api/projects/${projectId}/select`, {
+            method: 'POST'
+        });
+        
+        await loadProjects();
+    } catch (error) {
+        console.error('Error selecting project:', error);
+    }
+}
+
+function openProjectModal() {
+    const modal = document.getElementById('project-modal-overlay');
+    if (!modal) {
+        console.error('Project modal overlay not found');
+        return;
+    }
+    modal.classList.add('active');
+    renderProjectList();
+}
+
+function closeProjectModal() {
+    const modal = document.getElementById('project-modal-overlay');
+    if (!modal) {
+        console.error('Project modal overlay not found');
+        return;
+    }
+    modal.classList.remove('active');
+}
+
+function renderProjectList() {
+    const listElement = document.getElementById('modal-project-list');
+    
+    if (!listElement) {
+        console.error('Modal project list element not found');
+        return;
+    }
+    
+    if (projects.length === 0) {
+        listElement.innerHTML = '<div class="empty-state">Нет проектов</div>';
+        return;
+    }
+    
+    listElement.innerHTML = projects.map(p => `
+        <div class="project-list-item">
+            <span class="project-name">${escapeHtml(p.name)}</span>
+            <button class="delete-project-btn" onclick="deleteProject(${p.id})">
+                🗑️
+            </button>
+        </div>
+    `).join('');
+}
+
+async function addProject() {
+    const path = prompt('Введите путь к проекту:');
+    
+    if (!path) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/projects`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectPath: path })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Ошибка добавления проекта');
+        }
+        
+        await loadProjects();
+        renderProjectList();
+    } catch (error) {
+        alert('Ошибка добавления проекта: ' + error.message);
+    }
+}
+
+async function deleteProject(projectId) {
+    if (!confirm('Удалить проект из списка?')) {
+        return;
+    }
+    
+    try {
+        await fetch(`${API_BASE}/api/projects/${projectId}`, {
+            method: 'DELETE'
+        });
+        
+        await loadProjects();
+        renderProjectList();
+    } catch (error) {
+        alert('Ошибка удаления проекта: ' + error.message);
+    }
 }
 
 function setupEventListeners() {
@@ -34,14 +147,6 @@ function setupEventListeners() {
         }
     });
     
-    // Save project path when user changes it
-    document.getElementById('project-path-input').addEventListener('change', (e) => {
-        const path = e.target.value.trim();
-        if (path) {
-            localStorage.setItem('lastProjectPath', path);
-        }
-    });
-    
     // Model configuration modal
     document.getElementById('open-config-button').addEventListener('click', openConfigModal);
     document.getElementById('close-modal').addEventListener('click', closeConfigModal);
@@ -50,6 +155,16 @@ function setupEventListeners() {
             closeConfigModal();
         }
     });
+    
+    // Project management modal
+    const projectModalOverlay = document.getElementById('project-modal-overlay');
+    if (projectModalOverlay) {
+        projectModalOverlay.addEventListener('click', (e) => {
+            if (e.target.id === 'project-modal-overlay') {
+                closeProjectModal();
+            }
+        });
+    }
     
     // Tab switching
     document.querySelectorAll('.tab-button').forEach(button => {
@@ -116,11 +231,11 @@ async function loadDialogues() {
 }
 
 async function createDialogue() {
-    const pathInput = document.getElementById('project-path-input');
-    const projectPath = pathInput.value.trim();
+    // Получаем выбранный проект
+    const selectedProject = projects.find(p => p.isSelected);
     
-    if (!projectPath) {
-        alert('Введите путь к проекту');
+    if (!selectedProject) {
+        alert('Выберите проект из списка');
         return;
     }
     
@@ -128,7 +243,7 @@ async function createDialogue() {
         const response = await fetch(`${API_BASE}/api/dialogues`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectPath })
+            body: JSON.stringify({ projectPath: selectedProject.path })
         });
         
         if (!response.ok) {
@@ -138,10 +253,6 @@ async function createDialogue() {
         
         const dialogue = await response.json();
         
-        // Save the project path to localStorage
-        localStorage.setItem('lastProjectPath', projectPath);
-        
-        // Don't clear the input - keep it for next time
         await loadDialogues();
         selectDialogue(dialogue.id);
     } catch (error) {
@@ -253,6 +364,57 @@ async function loadCheckpoints(dialogueId) {
     }
 }
 
+// Manual Checkpoint Functions
+
+async function createManualCheckpoint() {
+    if (!currentDialogueId) {
+        alert('Выберите диалог');
+        return;
+    }
+    
+    const description = prompt('Описание чекпойнта (необязательно):');
+    
+    // Пользователь отменил
+    if (description === null) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(
+            `${API_BASE}/api/dialogues/${currentDialogueId}/checkpoints`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    description: description || 'Manual checkpoint' 
+                })
+            }
+        );
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Ошибка создания чекпойнта');
+        }
+        
+        await loadCheckpoints(currentDialogueId);
+        showStatusMessage('Чекпойнт создан', 'success');
+    } catch (error) {
+        console.error('Error creating checkpoint:', error);
+        showStatusMessage('Ошибка создания чекпойнта: ' + error.message, 'error');
+    }
+}
+
+function showStatusMessage(message, type) {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type === 'error' ? 'toast-error' : ''}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.remove();
+    }, 3000);
+}
+
 async function sendMessage() {
     if (!currentDialogueId) {
         alert('Выберите диалог');
@@ -337,6 +499,33 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Model Connection Validation
+async function validateModelConnection() {
+    try {
+        const response = await fetch(`${API_BASE}/api/startup/validate`);
+        const result = await response.json();
+        
+        if (!result.isConnected && result.errorMessage) {
+            showStartupWarning(result.errorMessage);
+        }
+    } catch (error) {
+        console.error('Error validating model connection:', error);
+    }
+}
+
+function showStartupWarning(message) {
+    const warningDiv = document.createElement('div');
+    warningDiv.className = 'startup-warning';
+    warningDiv.innerHTML = `
+        <div class="warning-content">
+            <span class="warning-icon">⚠️</span>
+            <span class="warning-message">${escapeHtml(message)}</span>
+            <button class="warning-close" onclick="this.parentElement.parentElement.remove()">✕</button>
+        </div>
+    `;
+    document.body.insertBefore(warningDiv, document.body.firstChild);
 }
 
 function showHelp() {

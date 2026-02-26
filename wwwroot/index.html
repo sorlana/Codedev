@@ -16,12 +16,61 @@
             background: #f5f5f5;
             height: 100vh;
             display: flex;
+            overflow: hidden;
+        }
+
+        /* Startup Warning Styles */
+        .startup-warning {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #fff3cd;
+            border-bottom: 2px solid #ffc107;
+            z-index: 2000;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .warning-content {
+            display: flex;
+            align-items: center;
+            padding: 15px 20px;
+            gap: 12px;
+        }
+
+        .warning-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+
+        .warning-message {
+            flex: 1;
+            color: #856404;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .warning-close {
+            background: transparent;
+            border: none;
+            color: #856404;
+            cursor: pointer;
+            font-size: 20px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+            flex-shrink: 0;
+        }
+
+        .warning-close:hover {
+            background: rgba(0, 0, 0, 0.1);
         }
 
         #app {
             display: flex;
             width: 100%;
             height: 100%;
+            min-height: 0;
         }
 
         #sidebar {
@@ -93,6 +142,155 @@
 
         .clear-input-button:hover {
             color: #dc3545;
+        }
+
+        /* Project Selector Styles */
+        .project-selector-container {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        #project-selector {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+        }
+
+        #open-project-modal-btn {
+            padding: 8px 12px;
+            background: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        #open-project-modal-btn:hover {
+            background: #5a6268;
+        }
+
+        /* Project Modal Styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 20px;
+        }
+
+        .close-modal {
+            background: transparent;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .close-modal:hover {
+            color: #000;
+        }
+
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        #modal-project-list {
+            margin-bottom: 20px;
+        }
+
+        .project-list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        .project-name {
+            flex: 1;
+            font-weight: 500;
+        }
+
+        .delete-project-btn {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 4px 8px;
+            color: #dc3545;
+        }
+
+        .delete-project-btn:hover {
+            background: rgba(220, 53, 69, 0.1);
+            border-radius: 4px;
+        }
+
+        .empty-state {
+            text-align: center;
+            color: #666;
+            padding: 20px;
+        }
+
+        .btn-primary {
+            width: 100%;
+            padding: 10px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
         }
 
         #new-dialogue-form input {
@@ -199,6 +397,7 @@
             flex: 1;
             display: flex;
             flex-direction: column;
+            min-height: 0;
         }
 
         #dialogue-view {
@@ -206,6 +405,7 @@
             display: flex;
             flex-direction: column;
             padding: 20px;
+            min-height: 0;
         }
 
         #message-list {
@@ -215,6 +415,7 @@
             background: white;
             border-radius: 8px;
             padding: 20px;
+            min-height: 0;
         }
 
         .message {
@@ -254,6 +455,7 @@
             border-radius: 8px;
             display: flex;
             gap: 10px;
+            flex-shrink: 0;
         }
 
         #prompt-input {
@@ -291,9 +493,64 @@
             overflow-y: auto;
         }
 
-        #checkpoint-panel h2 {
-            font-size: 16px;
+        .checkpoint-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 15px;
+        }
+
+        .checkpoint-header h2 {
+            font-size: 16px;
+            margin: 0;
+        }
+
+        #create-checkpoint-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 18px;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+
+        #create-checkpoint-btn:hover {
+            background: #218838;
+        }
+
+        /* Toast Notification Styles */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            background: #28a745;
+            color: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            z-index: 2000;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .toast-error {
+            background: #dc3545;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
         }
 
         .checkpoint-item {
@@ -552,9 +809,13 @@
                     <button class="help-button" onclick="showHelp()" title="Помощь">❓</button>
                 </h1>
                 <div id="new-dialogue-form">
-                    <div class="input-with-clear">
-                        <input type="text" id="project-path-input" placeholder="Путь к проекту C#">
-                        <button class="clear-input-button" onclick="clearProjectPath()" title="Очистить">✕</button>
+                    <div class="project-selector-container">
+                        <select id="project-selector" onchange="selectProject(this.value)">
+                            <option value="">Выберите проект</option>
+                        </select>
+                        <button id="open-project-modal-btn" onclick="openProjectModal()" title="Управление проектами">
+                            📁
+                        </button>
                     </div>
                     <div class="button-row">
                         <button id="create-dialogue-button">Создать диалог</button>
@@ -576,7 +837,12 @@
         </div>
 
         <div id="checkpoint-panel">
-            <h2>Чекпоинты</h2>
+            <div class="checkpoint-header">
+                <h2>Чекпоинты</h2>
+                <button id="create-checkpoint-btn" onclick="createManualCheckpoint()" title="Добавить чекпойнт">
+                    ➕
+                </button>
+            </div>
             <div id="checkpoint-list"></div>
         </div>
     </div>
@@ -656,6 +922,20 @@
             </div>
 
             <div id="status-message"></div>
+        </div>
+    </div>
+
+    <!-- Project Management Modal -->
+    <div id="project-modal-overlay" class="modal-overlay">
+        <div id="project-modal" class="modal">
+            <div class="modal-header">
+                <h2>Управление проектами</h2>
+                <button class="close-modal" onclick="closeProjectModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="modal-project-list"></div>
+                <button id="add-project-btn" class="btn-primary" onclick="addProject()">Добавить</button>
+            </div>
         </div>
     </div>
 

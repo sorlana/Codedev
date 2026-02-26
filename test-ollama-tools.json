@@ -1,0 +1,29 @@
+{
+  "model": "deepseek-r1:7b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Find the symbol named 'MyClass'"
+    }
+  ],
+  "stream": false,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "find_symbol",
+        "description": "Find a symbol (class, method, property) by name in the C# project",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "symbolName": {
+              "type": "string",
+              "description": "The name of the symbol to find"
+            }
+          },
+          "required": ["symbolName"]
+        }
+      }
+    }
+  ]
+}
