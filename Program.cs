@@ -295,6 +295,24 @@ app.MapPost("/api/dialogues/{id}/messages", async (
     }
 });
 
+app.MapDelete("/api/messages/{messageId}", async (
+    int messageId,
+    RefactoringDbContext dbContext) =>
+{
+    var message = await dbContext.Messages.FindAsync(messageId);
+    
+    if (message == null)
+        return Results.NotFound(new { message = "Message not found" });
+
+    dbContext.Messages.Remove(message);
+    await dbContext.SaveChangesAsync();
+
+    app.Logger.LogInformation("Deleted message {MessageId} from dialogue {DialogueId}",
+        messageId, message.DialogueId);
+
+    return Results.Ok(new { message = "Message deleted successfully" });
+});
+
 // Checkpoint endpoints
 app.MapGet("/api/dialogues/{id}/checkpoints", async (
     int id,

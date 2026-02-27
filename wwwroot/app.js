@@ -628,6 +628,11 @@ class VirtualList {
         messageDiv.className = `message ${item.role}`;
         messageDiv.dataset.index = index;
         
+        // Добавляем messageId как data-атрибут
+        if (item.id) {
+            messageDiv.dataset.messageId = item.id;
+        }
+        
         const roleDiv = document.createElement('div');
         roleDiv.className = 'message-role';
         roleDiv.textContent = item.role === 'user' ? 'Вы' : 'Ассистент';
@@ -638,6 +643,19 @@ class VirtualList {
         
         messageDiv.appendChild(roleDiv);
         messageDiv.appendChild(contentDiv);
+        
+        // Добавляем кнопку удаления если есть messageId
+        if (item.id) {
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'message-delete-btn';
+            deleteBtn.innerHTML = '🗑️';
+            deleteBtn.title = 'Удалить сообщение';
+            deleteBtn.onclick = (e) => {
+                e.stopPropagation();
+                deleteMessage(item.id);
+            };
+            messageDiv.appendChild(deleteBtn);
+        }
         
         return messageDiv;
     }
@@ -1637,15 +1655,6 @@ function setupEventListeners() {
         cancelGenerationBtn.addEventListener('click', cancelGeneration);
     }
     
-    // Model configuration modal
-    document.getElementById('open-config-button').addEventListener('click', openConfigModal);
-    document.getElementById('close-modal').addEventListener('click', closeConfigModal);
-    document.getElementById('model-config-overlay').addEventListener('click', (e) => {
-        if (e.target.id === 'model-config-overlay') {
-            closeConfigModal();
-        }
-    });
-    
     // Project management modal
     const projectModalOverlay = document.getElementById('project-modal-overlay');
     if (projectModalOverlay) {
@@ -1655,36 +1664,6 @@ function setupEventListeners() {
             }
         });
     }
-    
-    // Tab switching
-    document.querySelectorAll('.tab-button').forEach(button => {
-        button.addEventListener('click', () => switchTab(button.dataset.tab));
-    });
-    
-    // Save configuration buttons
-    document.getElementById('save-provider').addEventListener('click', saveProviderConfiguration);
-    document.getElementById('save-local').addEventListener('click', saveLocalConfiguration);
-    
-    // Refresh models button
-    document.getElementById('refresh-models').addEventListener('click', refreshOllamaModels);
-    
-    // Test connection buttons
-    document.getElementById('test-provider').addEventListener('click', testProviderConnection);
-    document.getElementById('test-local').addEventListener('click', testLocalConnection);
-    
-    // Real-time validation - clear errors when user starts typing
-    document.getElementById('provider-base-url').addEventListener('input', () => clearFieldError('provider-base-url'));
-    document.getElementById('provider-api-key').addEventListener('input', () => clearFieldError('provider-api-key'));
-    document.getElementById('provider-model').addEventListener('input', () => clearFieldError('provider-model'));
-    document.getElementById('ollama-base-url').addEventListener('input', () => clearFieldError('ollama-base-url'));
-    document.getElementById('ollama-model').addEventListener('change', () => clearFieldError('ollama-model'));
-    
-    // Close modal on Escape key
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            closeConfigModal();
-        }
-    });
 }
 
 async function loadDialogues() {
@@ -2500,6 +2479,39 @@ async function sendMessage() {
     }
 }
 
+// Функция удаления сообщения
+async function deleteMessage(messageId) {
+    if (!confirm('Вы уверены, что хотите удалить это сообщение?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/messages/${messageId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        // Удаляем элемент из DOM
+        const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (messageElement) {
+            messageElement.remove();
+        }
+        
+        // Перезагружаем сообщения для обновления кэша
+        if (currentDialogueId) {
+            await loadMessages(currentDialogueId);
+        }
+        
+        console.log(`[UI] Сообщение ${messageId} удалено`);
+    } catch (error) {
+        console.error('Error deleting message:', error);
+        alert('Ошибка при удалении сообщения');
+    }
+}
+
 // Вспомогательная функция для отправки сообщения через HTTP
 async function sendMessageViaHttp(content, typingIndicator) {
     const response = await fetch(`${API_BASE}/api/dialogues/${currentDialogueId}/messages`, {
@@ -2541,9 +2553,14 @@ async function sendMessageViaHttp(content, typingIndicator) {
 }
 
 // Вспомогательная функция для создания элемента сообщения
-function createMessageElement(role, content) {
+function createMessageElement(role, content, messageId = null) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${role}`;
+    
+    // Сохраняем messageId как data-атрибут если он есть
+    if (messageId) {
+        messageDiv.dataset.messageId = messageId;
+    }
     
     const roleDiv = document.createElement('div');
     roleDiv.className = 'message-role';
@@ -2555,6 +2572,16 @@ function createMessageElement(role, content) {
     
     messageDiv.appendChild(roleDiv);
     messageDiv.appendChild(contentDiv);
+    
+    // Добавляем кнопку удаления если есть messageId
+    if (messageId) {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'message-delete-btn';
+        deleteBtn.innerHTML = '🗑️';
+        deleteBtn.title = 'Удалить сообщение';
+        deleteBtn.onclick = () => deleteMessage(messageId);
+        messageDiv.appendChild(deleteBtn);
+    }
     
     return messageDiv;
 }
@@ -2784,527 +2811,7 @@ function showHelp() {
     alert(helpText);
 }
 
-// Model Configuration Modal Functions
 
-async function openConfigModal() {
-    const overlay = document.getElementById('model-config-overlay');
-    overlay.classList.add('active');
-    await loadConfiguration();
-}
-
-async function loadConfiguration() {
-    try {
-        const response = await fetch(`${API_BASE}/api/configuration`);
-        
-        if (!response.ok) {
-            throw new Error('Failed to load configuration');
-        }
-        
-        const data = await response.json();
-        const config = data.configuration;
-        
-        if (!config) {
-            return;
-        }
-        
-        // Determine which tab to activate based on provider type
-        const activeTab = config.provider?.toLowerCase() === 'ollama' ? 'local' : 'provider';
-        switchTab(activeTab);
-        
-        // Populate Provider tab fields
-        if (config.openAI) {
-            document.getElementById('provider-base-url').value = config.openAI.baseUrl || '';
-            document.getElementById('provider-api-key').value = config.openAI.apiKey || '';
-            document.getElementById('provider-model').value = config.openAI.model || '';
-        }
-        
-        // Populate Local tab fields
-        if (config.ollama) {
-            document.getElementById('ollama-base-url').value = config.ollama.baseUrl || '';
-            
-            // Set the model value in the select dropdown
-            const modelSelect = document.getElementById('ollama-model');
-            const modelValue = config.ollama.model || '';
-            
-            // Check if the option exists, if not add it
-            let optionExists = false;
-            for (let i = 0; i < modelSelect.options.length; i++) {
-                if (modelSelect.options[i].value === modelValue) {
-                    optionExists = true;
-                    break;
-                }
-            }
-            
-            if (!optionExists && modelValue) {
-                const option = document.createElement('option');
-                option.value = modelValue;
-                option.textContent = modelValue;
-                modelSelect.appendChild(option);
-            }
-            
-            modelSelect.value = modelValue;
-        }
-        
-    } catch (error) {
-        console.error('Error loading configuration:', error);
-        showStatusMessage('Failed to load configuration: ' + error.message, 'error');
-    }
-}
-
-function closeConfigModal() {
-    const overlay = document.getElementById('model-config-overlay');
-    overlay.classList.remove('active');
-}
-
-function switchTab(tabName) {
-    // Update tab buttons
-    document.querySelectorAll('.tab-button').forEach(button => {
-        if (button.dataset.tab === tabName) {
-            button.classList.add('active');
-        } else {
-            button.classList.remove('active');
-        }
-    });
-    
-    // Update tab content
-    document.querySelectorAll('.tab-content').forEach(content => {
-        if (content.id === `${tabName}-tab`) {
-            content.classList.add('active');
-        } else {
-            content.classList.remove('active');
-        }
-    });
-}
-
-function showStatusMessage(message, type) {
-    const statusElement = document.getElementById('status-message');
-    statusElement.textContent = message;
-    statusElement.className = type; // 'success' or 'error'
-    
-    // Auto-hide success messages after 3 seconds
-    if (type === 'success') {
-        setTimeout(() => {
-            statusElement.className = '';
-            statusElement.textContent = '';
-        }, 3000);
-    }
-}
-
-// Validation Functions
-
-function validateUrl(url) {
-    if (!url || url.trim() === '') {
-        return false;
-    }
-    
-    try {
-        const urlObj = new URL(url);
-        return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
-    } catch (e) {
-        return false;
-    }
-}
-
-function validateRequiredField(value) {
-    return value && value.trim() !== '';
-}
-
-function clearFieldError(fieldId) {
-    const field = document.getElementById(fieldId);
-    if (field) {
-        field.style.borderColor = '';
-        
-        // Remove any existing error message
-        const existingError = field.parentElement.querySelector('.field-error');
-        if (existingError) {
-            existingError.remove();
-        }
-    }
-}
-
-function showFieldError(fieldId, message) {
-    const field = document.getElementById(fieldId);
-    if (field) {
-        field.style.borderColor = '#dc3545';
-        
-        // Remove any existing error message
-        const existingError = field.parentElement.querySelector('.field-error');
-        if (existingError) {
-            existingError.remove();
-        }
-        
-        // Add new error message
-        const errorDiv = document.createElement('div');
-        errorDiv.className = 'field-error';
-        errorDiv.textContent = message;
-        errorDiv.style.color = '#dc3545';
-        errorDiv.style.fontSize = '12px';
-        errorDiv.style.marginTop = '4px';
-        field.parentElement.appendChild(errorDiv);
-    }
-}
-
-function validateProviderConfiguration() {
-    let isValid = true;
-    const errors = [];
-    
-    // Clear previous errors
-    clearFieldError('provider-base-url');
-    clearFieldError('provider-api-key');
-    clearFieldError('provider-model');
-    
-    // Get field values
-    const baseUrl = document.getElementById('provider-base-url').value;
-    const apiKey = document.getElementById('provider-api-key').value;
-    const model = document.getElementById('provider-model').value;
-    
-    // Validate base URL
-    if (!validateRequiredField(baseUrl)) {
-        showFieldError('provider-base-url', 'Base URL is required');
-        errors.push('Base URL is required');
-        isValid = false;
-    } else if (!validateUrl(baseUrl)) {
-        showFieldError('provider-base-url', 'Invalid URL format');
-        errors.push('Base URL must be a valid URL');
-        isValid = false;
-    }
-    
-    // Validate API key
-    if (!validateRequiredField(apiKey)) {
-        showFieldError('provider-api-key', 'API Key is required');
-        errors.push('API Key is required');
-        isValid = false;
-    }
-    
-    // Validate model
-    if (!validateRequiredField(model)) {
-        showFieldError('provider-model', 'Model name is required');
-        errors.push('Model name is required');
-        isValid = false;
-    }
-    
-    return { isValid, errors };
-}
-
-function validateLocalConfiguration() {
-    let isValid = true;
-    const errors = [];
-    
-    // Clear previous errors
-    clearFieldError('ollama-base-url');
-    clearFieldError('ollama-model');
-    
-    // Get field values
-    const baseUrl = document.getElementById('ollama-base-url').value;
-    const model = document.getElementById('ollama-model').value;
-    
-    // Validate base URL
-    if (!validateRequiredField(baseUrl)) {
-        showFieldError('ollama-base-url', 'Ollama URL is required');
-        errors.push('Ollama URL is required');
-        isValid = false;
-    } else if (!validateUrl(baseUrl)) {
-        showFieldError('ollama-base-url', 'Invalid URL format');
-        errors.push('Ollama URL must be a valid URL');
-        isValid = false;
-    }
-    
-    // Validate model
-    if (!validateRequiredField(model)) {
-        showFieldError('ollama-model', 'Model selection is required');
-        errors.push('Model selection is required');
-        isValid = false;
-    }
-    
-    return { isValid, errors };
-}
-
-async function saveProviderConfiguration() {
-    // Validate configuration
-    const validation = validateProviderConfiguration();
-    
-    if (!validation.isValid) {
-        showStatusMessage('Please fix the validation errors: ' + validation.errors.join(', '), 'error');
-        return;
-    }
-    
-    // Get field values
-    const baseUrl = document.getElementById('provider-base-url').value.trim();
-    const apiKey = document.getElementById('provider-api-key').value.trim();
-    const model = document.getElementById('provider-model').value.trim();
-    
-    // Build configuration request
-    const configRequest = {
-        provider: 'OpenAI',
-        openAI: {
-            baseUrl: baseUrl,
-            apiKey: apiKey,
-            model: model
-        }
-    };
-    
-    try {
-        const saveButton = document.getElementById('save-provider');
-        saveButton.disabled = true;
-        saveButton.textContent = 'Saving...';
-        
-        const response = await fetch(`${API_BASE}/api/configuration`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(configRequest)
-        });
-        
-        if (!response.ok) {
-            const error = await response.text();
-            throw new Error(error);
-        }
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            showStatusMessage('Provider configuration saved successfully', 'success');
-        } else {
-            showStatusMessage('Failed to save configuration: ' + (result.message || 'Unknown error'), 'error');
-        }
-        
-    } catch (error) {
-        console.error('Error saving provider configuration:', error);
-        showStatusMessage('Error saving configuration: ' + error.message, 'error');
-    } finally {
-        const saveButton = document.getElementById('save-provider');
-        saveButton.disabled = false;
-        saveButton.textContent = 'Save Provider Configuration';
-    }
-}
-
-async function saveLocalConfiguration() {
-    // Validate configuration
-    const validation = validateLocalConfiguration();
-    
-    if (!validation.isValid) {
-        showStatusMessage('Please fix the validation errors: ' + validation.errors.join(', '), 'error');
-        return;
-    }
-    
-    // Get field values
-    const baseUrl = document.getElementById('ollama-base-url').value.trim();
-    const model = document.getElementById('ollama-model').value.trim();
-    
-    // Build configuration request
-    const configRequest = {
-        provider: 'Ollama',
-        ollama: {
-            baseUrl: baseUrl,
-            model: model
-        }
-    };
-    
-    try {
-        const saveButton = document.getElementById('save-local');
-        saveButton.disabled = true;
-        saveButton.textContent = 'Saving...';
-        
-        const response = await fetch(`${API_BASE}/api/configuration`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(configRequest)
-        });
-        
-        if (!response.ok) {
-            const error = await response.text();
-            throw new Error(error);
-        }
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            showStatusMessage('Local configuration saved successfully', 'success');
-        } else {
-            showStatusMessage('Failed to save configuration: ' + (result.message || 'Unknown error'), 'error');
-        }
-        
-    } catch (error) {
-        console.error('Error saving local configuration:', error);
-        showStatusMessage('Error saving configuration: ' + error.message, 'error');
-    } finally {
-        const saveButton = document.getElementById('save-local');
-        saveButton.disabled = false;
-        saveButton.textContent = 'Save Local Configuration';
-    }
-}
-
-async function refreshOllamaModels() {
-    const refreshButton = document.getElementById('refresh-models');
-    const modelSelect = document.getElementById('ollama-model');
-    const ollamaBaseUrl = document.getElementById('ollama-base-url').value.trim();
-    
-    try {
-        // Disable button and show loading state
-        refreshButton.disabled = true;
-        refreshButton.textContent = 'Refreshing...';
-        
-        // Clear current options except the first one
-        modelSelect.innerHTML = '<option value="">Select a model</option>';
-        
-        // Fetch models from the API
-        const response = await fetch(`${API_BASE}/api/configuration/ollama/models`);
-        
-        if (!response.ok) {
-            throw new Error('Failed to fetch models from Ollama');
-        }
-        
-        const data = await response.json();
-        
-        // Check if we got any models
-        if (!data.models || data.models.length === 0) {
-            // Handle connection error gracefully
-            const baseUrlDisplay = ollamaBaseUrl || 'http://localhost:11434';
-            showStatusMessage(
-                `Unable to connect to Ollama at ${baseUrlDisplay}. Please verify Ollama is running and the URL is correct.`,
-                'error'
-            );
-            return;
-        }
-        
-        // Populate the dropdown with fetched models
-        data.models.forEach(modelName => {
-            const option = document.createElement('option');
-            option.value = modelName;
-            option.textContent = modelName;
-            modelSelect.appendChild(option);
-        });
-        
-        showStatusMessage(`Successfully loaded ${data.models.length} model(s) from Ollama`, 'success');
-        
-    } catch (error) {
-        console.error('Error fetching Ollama models:', error);
-        const baseUrlDisplay = ollamaBaseUrl || 'http://localhost:11434';
-        showStatusMessage(
-            `Error connecting to Ollama at ${baseUrlDisplay}: ${error.message}`,
-            'error'
-        );
-    } finally {
-        // Re-enable button and restore text
-        refreshButton.disabled = false;
-        refreshButton.textContent = 'Refresh Models';
-    }
-}
-
-// Test Connection Functions
-
-async function testProviderConnection() {
-    // Validate configuration first
-    const validation = validateProviderConfiguration();
-    
-    if (!validation.isValid) {
-        showStatusMessage('Please fix the validation errors before testing connection', 'error');
-        return;
-    }
-    
-    // Get field values
-    const baseUrl = document.getElementById('provider-base-url').value.trim();
-    const apiKey = document.getElementById('provider-api-key').value.trim();
-    const model = document.getElementById('provider-model').value.trim();
-    
-    // Build configuration request
-    const configRequest = {
-        provider: 'OpenAI',
-        openAI: {
-            baseUrl: baseUrl,
-            apiKey: apiKey,
-            model: model
-        }
-    };
-    
-    try {
-        const testButton = document.getElementById('test-provider');
-        testButton.disabled = true;
-        testButton.textContent = 'Testing...';
-        
-        const response = await fetch(`${API_BASE}/api/configuration/test`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(configRequest)
-        });
-        
-        if (!response.ok) {
-            const error = await response.text();
-            throw new Error(error);
-        }
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            showStatusMessage('Connection test successful! ' + result.message, 'success');
-        } else {
-            showStatusMessage('Connection test failed: ' + result.message, 'error');
-        }
-        
-    } catch (error) {
-        console.error('Error testing provider connection:', error);
-        showStatusMessage('Connection test failed: ' + error.message, 'error');
-    } finally {
-        const testButton = document.getElementById('test-provider');
-        testButton.disabled = false;
-        testButton.textContent = 'Test Connection';
-    }
-}
-
-async function testLocalConnection() {
-    // Validate configuration first
-    const validation = validateLocalConfiguration();
-    
-    if (!validation.isValid) {
-        showStatusMessage('Please fix the validation errors before testing connection', 'error');
-        return;
-    }
-    
-    // Get field values
-    const baseUrl = document.getElementById('ollama-base-url').value.trim();
-    const model = document.getElementById('ollama-model').value.trim();
-    
-    // Build configuration request
-    const configRequest = {
-        provider: 'Ollama',
-        ollama: {
-            baseUrl: baseUrl,
-            model: model
-        }
-    };
-    
-    try {
-        const testButton = document.getElementById('test-local');
-        testButton.disabled = true;
-        testButton.textContent = 'Testing...';
-        
-        const response = await fetch(`${API_BASE}/api/configuration/test`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(configRequest)
-        });
-        
-        if (!response.ok) {
-            const error = await response.text();
-            throw new Error(error);
-        }
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            showStatusMessage('Connection test successful! ' + result.message, 'success');
-        } else {
-            showStatusMessage('Connection test failed: ' + result.message, 'error');
-        }
-        
-    } catch (error) {
-        console.error('Error testing local connection:', error);
-        showStatusMessage('Connection test failed: ' + error.message, 'error');
-    } finally {
-        const testButton = document.getElementById('test-local');
-        testButton.disabled = false;
-        testButton.textContent = 'Test Connection';
-    }
-}
 
 // Функции управления агентским режимом выполнения задач
 

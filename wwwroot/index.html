@@ -337,27 +337,8 @@
             background: #0056b3;
         }
 
-        #new-dialogue-form .button-row {
-            display: flex;
-            gap: 10px;
-        }
-
         #create-dialogue-button {
-            flex: 1;
-        }
-
-        #open-config-button {
-            padding: 8px 12px;
-            background: #6c757d;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        #open-config-button:hover {
-            background: #5a6268;
+            width: 100%;
         }
 
         #dialogue-list {
@@ -603,6 +584,7 @@
             margin-bottom: 20px;
             padding: 15px;
             border-radius: 8px;
+            position: relative;
         }
 
         .message.user {
@@ -628,6 +610,29 @@
         .message-content {
             white-space: pre-wrap;
             word-wrap: break-word;
+        }
+
+        /* Кнопка удаления сообщения */
+        .message-delete-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            opacity: 0;
+            transition: opacity 0.2s, background 0.2s;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .message:hover .message-delete-btn {
+            opacity: 1;
+        }
+
+        .message-delete-btn:hover {
+            background: rgba(220, 53, 69, 0.1);
         }
 
         /* Стили для индикатора "печатает..." */
@@ -835,200 +840,6 @@
             color: #666;
         }
 
-        /* Model Configuration Modal Styles */
-        #model-config-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
-
-        #model-config-overlay.active {
-            display: flex;
-        }
-
-        #model-config-modal {
-            background: white;
-            border-radius: 8px;
-            width: 90%;
-            max-width: 600px;
-            max-height: 80vh;
-            overflow-y: auto;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-
-        #modal-header {
-            padding: 20px;
-            border-bottom: 1px solid #ddd;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        #modal-header h2 {
-            font-size: 20px;
-            margin: 0;
-        }
-
-        #close-modal {
-            background: none;
-            border: none;
-            font-size: 24px;
-            cursor: pointer;
-            color: #666;
-            padding: 0;
-            width: 30px;
-            height: 30px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        #close-modal:hover {
-            color: #000;
-        }
-
-        .tabs {
-            display: flex;
-            border-bottom: 1px solid #ddd;
-        }
-
-        .tab-button {
-            flex: 1;
-            padding: 15px;
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-size: 16px;
-            color: #666;
-            border-bottom: 3px solid transparent;
-            transition: all 0.2s;
-        }
-
-        .tab-button:hover {
-            background: #f8f9fa;
-        }
-
-        .tab-button.active {
-            color: #007bff;
-            border-bottom-color: #007bff;
-        }
-
-        .tab-content {
-            display: none;
-            padding: 20px;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-            color: #333;
-        }
-
-        .form-group input,
-        .form-group select {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-            font-family: inherit;
-        }
-
-        .form-group input:focus,
-        .form-group select:focus {
-            outline: none;
-            border-color: #007bff;
-        }
-
-        .form-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
-
-        .btn-primary {
-            flex: 1;
-            padding: 12px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-        }
-
-        .btn-primary:hover {
-            background: #0056b3;
-        }
-
-        .btn-primary:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-
-        .btn-secondary {
-            padding: 12px 20px;
-            background: #6c757d;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .btn-secondary:hover {
-            background: #5a6268;
-        }
-
-        #status-message {
-            margin-top: 15px;
-            padding: 12px;
-            border-radius: 4px;
-            display: none;
-        }
-
-        #status-message.success {
-            display: block;
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-
-        #status-message.error {
-            display: block;
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-
-        .field-error {
-            color: #dc3545;
-            font-size: 12px;
-            margin-top: 4px;
-        }
-
-        .form-group input.invalid,
-        .form-group select.invalid {
-            border-color: #dc3545;
-        }
-
         /* Индикатор статуса выполнения */
         #execution-status-indicator {
             padding: 12px 16px;
@@ -1192,10 +1003,7 @@
                             📁
                         </button>
                     </div>
-                    <div class="button-row">
-                        <button id="create-dialogue-button">Создать диалог</button>
-                        <button id="open-config-button">⚙️</button>
-                    </div>
+                    <button id="create-dialogue-button">Создать диалог</button>
                 </div>
             </div>
             <div id="dialogue-list"></div>
@@ -1265,84 +1073,6 @@
                 </button>
             </div>
             <div id="checkpoint-list"></div>
-        </div>
-    </div>
-
-    <!-- Model Configuration Modal -->
-    <div id="model-config-overlay">
-        <div id="model-config-modal">
-            <div id="modal-header">
-                <h2>Model Configuration</h2>
-                <button id="close-modal" aria-label="Close">&times;</button>
-            </div>
-
-            <div class="tabs">
-                <button class="tab-button active" data-tab="provider">Provider</button>
-                <button class="tab-button" data-tab="local">Local</button>
-            </div>
-
-            <div id="provider-tab" class="tab-content active">
-                <div class="form-group">
-                    <label for="provider-base-url">Base URL</label>
-                    <input 
-                        type="text" 
-                        id="provider-base-url" 
-                        placeholder="https://api.deepseek.com/v1"
-                        aria-label="Provider base URL">
-                </div>
-
-                <div class="form-group">
-                    <label for="provider-api-key">API Key</label>
-                    <input 
-                        type="password" 
-                        id="provider-api-key" 
-                        placeholder="Enter your API key"
-                        aria-label="Provider API key">
-                </div>
-
-                <div class="form-group">
-                    <label for="provider-model">Model Name</label>
-                    <input 
-                        type="text" 
-                        id="provider-model" 
-                        placeholder="deepseek-chat"
-                        aria-label="Provider model name">
-                </div>
-
-                <div class="form-actions">
-                    <button id="save-provider" class="btn-primary">Save Provider Configuration</button>
-                    <button id="test-provider" class="btn-secondary">Test Connection</button>
-                </div>
-            </div>
-
-            <div id="local-tab" class="tab-content">
-                <div class="form-group">
-                    <label for="ollama-base-url">Ollama URL</label>
-                    <input 
-                        type="text" 
-                        id="ollama-base-url" 
-                        placeholder="http://localhost:11434"
-                        aria-label="Ollama base URL">
-                </div>
-
-                <div class="form-group">
-                    <label for="ollama-model">Model</label>
-                    <select id="ollama-model" aria-label="Ollama model selection">
-                        <option value="">Select a model</option>
-                    </select>
-                </div>
-
-                <div class="form-actions">
-                    <button id="refresh-models" class="btn-secondary">Refresh Models</button>
-                </div>
-
-                <div class="form-actions">
-                    <button id="save-local" class="btn-primary">Save Local Configuration</button>
-                    <button id="test-local" class="btn-secondary">Test Connection</button>
-                </div>
-            </div>
-
-            <div id="status-message"></div>
         </div>
     </div>
 
