@@ -297,7 +297,8 @@ public static class AgentCommandIntegrationTests
         var tasksFilePathResolverLogger = loggerFactory.CreateLogger<TasksFilePathResolver>();
         var tasksFilePathResolver = new TasksFilePathResolver(pathValidator, tasksFilePathResolverLogger);
         
-        var commandRecognizer = new CommandRecognizer();
+        var commandRecognizerLogger = loggerFactory.CreateLogger<CommandRecognizer>();
+        var commandRecognizer = new CommandRecognizer(commandRecognizerLogger);
         
         var promptProcessorLogger = loggerFactory.CreateLogger<PromptProcessor>();
         

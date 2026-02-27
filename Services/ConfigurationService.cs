@@ -57,7 +57,8 @@ public class ConfigurationService : IConfigurationService
                 config.Ollama = new OllamaSettings
                 {
                     BaseUrl = ollamaSection["BaseUrl"] ?? string.Empty,
-                    Model = ollamaSection["Model"] ?? string.Empty
+                    Model = ollamaSection["Model"] ?? string.Empty,
+                    ReasoningModel = ollamaSection["ReasoningModel"]
                 };
             }
 

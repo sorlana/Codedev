@@ -48,6 +48,7 @@ public class PromptProcessor : IPromptProcessor
         // 1. Load dialogue and validate
         var dialogue = await _dbContext.Dialogues
             .Include(d => d.Messages)
+            .Include(d => d.DialogueGroup) // Загружаем группу с контекстом
             .FirstOrDefaultAsync(d => d.Id == dialogueId);
 
         if (dialogue == null)
@@ -74,12 +75,23 @@ public class PromptProcessor : IPromptProcessor
         await _dbContext.SaveChangesAsync();
 
         // 3. Проверка на команду агентского режима
-        if (_commandRecognizer.TryRecognizeCommand(prompt, out var commandType, out var filePath))
+        _logger.LogInformation("=== НАЧАЛО ПРОВЕРКИ КОМАНДЫ ===");
+        _logger.LogInformation("Проверка команды агентского режима для промпта: '{Prompt}'", prompt);
+        _logger.LogInformation("Длина промпта: {Length}, Первые 50 символов: '{Preview}'", 
+            prompt.Length, 
+            prompt.Length > 50 ? prompt.Substring(0, 50) : prompt);
+        
+        var isRecognized = _commandRecognizer.TryRecognizeCommand(prompt, out var commandType, out var filePath, out var taskNumber);
+        _logger.LogInformation("Результат распознавания: {IsRecognized}, CommandType: {CommandType}, FilePath: {FilePath}, TaskNumber: {TaskNumber}",
+            isRecognized, commandType, filePath ?? "(null)", taskNumber?.ToString() ?? "(null)");
+        _logger.LogInformation("=== КОНЕЦ ПРОВЕРКИ КОМАНДЫ ===");
+        
+        if (isRecognized)
         {
-            _logger.LogInformation("Распознана команда агентского режима: {CommandType}, путь: {FilePath}", 
-                commandType, filePath ?? "(не указан)");
+            _logger.LogInformation("Распознана команда агентского режима: {CommandType}, путь: {FilePath}, номер задачи: {TaskNumber}", 
+                commandType, filePath ?? "(не указан)", taskNumber?.ToString() ?? "(не указан)");
             
-            var commandResult = await ExecuteAgentCommandAsync(dialogueId, commandType, filePath, projectPath);
+            var commandResult = await ExecuteAgentCommandAsync(dialogueId, commandType, filePath, projectPath, taskNumber);
             
             // Сохраняем ответ ассистента
             var assistantMessage = new Message
@@ -101,10 +113,7 @@ public class PromptProcessor : IPromptProcessor
             var toolDefinitions = GetSerenaToolDefinitions();
 
             // 4. Prepare system message with clear instructions
-            var systemMessage = new Message
-            {
-                Role = "system",
-                Content = @"You are a helpful AI assistant for C# project refactoring on Windows.
+            var systemMessageContent = @"You are a helpful AI assistant for C# project refactoring on Windows.
 
 CRITICAL: You MUST call the appropriate tools to perform actions. Never just describe what to do.
 
@@ -120,7 +129,44 @@ Available tools:
 - insert_before_symbol: Insert code
 - find_referencing_symbols: Find usages
 
-Respond in Russian, but call tools with English parameters."
+Respond in Russian, but call tools with English parameters.";
+
+            // Добавляем контекст группы диалогов, если он есть
+            if (dialogue.DialogueGroup != null)
+            {
+                var groupContext = new System.Text.StringBuilder();
+                groupContext.AppendLine("\n\n=== КОНТЕКСТ ГРУППЫ ДИАЛОГОВ ===");
+                
+                if (!string.IsNullOrWhiteSpace(dialogue.DialogueGroup.Requirements))
+                {
+                    groupContext.AppendLine("\n--- ТРЕБОВАНИЯ (Requirements) ---");
+                    groupContext.AppendLine(dialogue.DialogueGroup.Requirements);
+                }
+                
+                if (!string.IsNullOrWhiteSpace(dialogue.DialogueGroup.Design))
+                {
+                    groupContext.AppendLine("\n--- ПРОЕКТИРОВАНИЕ (Design) ---");
+                    groupContext.AppendLine(dialogue.DialogueGroup.Design);
+                }
+                
+                if (!string.IsNullOrWhiteSpace(dialogue.DialogueGroup.Tasks))
+                {
+                    groupContext.AppendLine("\n--- ЗАДАЧИ (Tasks) ---");
+                    groupContext.AppendLine(dialogue.DialogueGroup.Tasks);
+                }
+                
+                groupContext.AppendLine("\n=== КОНЕЦ КОНТЕКСТА ГРУППЫ ===");
+                groupContext.AppendLine("\nИспользуй этот контекст для понимания требований, архитектуры и задач проекта при выполнении запросов пользователя.");
+                
+                systemMessageContent += groupContext.ToString();
+                
+                _logger.LogInformation("Добавлен контекст группы '{GroupName}' в системный промпт", dialogue.DialogueGroup.Name);
+            }
+
+            var systemMessage = new Message
+            {
+                Role = "system",
+                Content = systemMessageContent
             };
 
             // 5. Send prompt to LLM with system message
@@ -233,11 +279,13 @@ Respond in Russian, but call tools with English parameters."
                         _logger.LogError(ex, "Error executing function {FunctionName}", functionCall.Name);
                         resultBuilder.AppendLine($"❌ Ошибка: {ex.Message}");
                         resultBuilder.AppendLine();
+                        hasExplanation = true; // Помечаем, что есть сообщение об ошибке
                     }
                 }
                 
-                // Добавляем итоговое сообщение, если модель не дала объяснения
-                if (!hasExplanation)
+                // Добавляем итоговое сообщение только если не было ошибок и модель не дала объяснения
+                var hasErrors = resultBuilder.ToString().Contains("❌");
+                if (!hasExplanation && !hasErrors)
                 {
                     resultBuilder.AppendLine("Готово! Операция выполнена успешно.");
                 }
@@ -291,12 +339,14 @@ Respond in Russian, but call tools with English parameters."
     /// <param name="commandType">Тип команды</param>
     /// <param name="filePath">Путь к файлу tasks.md (может быть null)</param>
     /// <param name="projectPath">Путь к проекту</param>
+    /// <param name="taskNumber">Номер конкретной задачи для выполнения (может быть null)</param>
     /// <returns>Сообщение с результатом выполнения команды</returns>
     private async Task<string> ExecuteAgentCommandAsync(
         int dialogueId,
         AgentCommandType commandType,
         string? filePath,
-        string projectPath)
+        string projectPath,
+        int? taskNumber = null)
     {
         try
         {
@@ -305,16 +355,35 @@ Respond in Russian, but call tools with English parameters."
             switch (commandType)
             {
                 case AgentCommandType.StartExecution:
+                    // Логируем параметры перед разрешением пути
+                    _logger.LogInformation(
+                        "Разрешение пути к файлу tasks.md: filePath={FilePath}, projectPath={ProjectPath}", 
+                        filePath ?? "(null)", 
+                        projectPath);
+                    
                     // Разрешаем путь к файлу tasks.md
                     var resolvedPath = await _tasksFilePathResolver.ResolveTasksFilePathAsync(filePath, projectPath);
                     
-                    _logger.LogInformation("Запуск выполнения задач из файла: {FilePath}", resolvedPath);
-                    
-                    // Запускаем выполнение задач
-                    var sessionId = await taskExecutor.ExecuteTasksAsync(dialogueId, resolvedPath);
-                    
-                    return $"✅ Запущено выполнение задач из файла {Path.GetFileName(resolvedPath)}\n\n" +
-                           $"Следите за прогрессом в сообщениях ниже. Вы можете остановить выполнение в любой момент.";
+                    if (taskNumber.HasValue)
+                    {
+                        _logger.LogInformation("Запуск выполнения задачи {TaskNumber} из файла: {FilePath}", taskNumber.Value, resolvedPath);
+                        
+                        // Запускаем выполнение конкретной задачи
+                        var sessionId = await taskExecutor.ExecuteSpecificTaskAsync(dialogueId, resolvedPath, taskNumber.Value);
+                        
+                        return $"✅ Запущено выполнение задачи {taskNumber.Value} из файла {Path.GetFileName(resolvedPath)}\n\n" +
+                               $"Следите за прогрессом в сообщениях ниже.";
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Запуск выполнения всех задач из файла: {FilePath}", resolvedPath);
+                        
+                        // Запускаем выполнение всех задач
+                        var sessionId = await taskExecutor.ExecuteTasksAsync(dialogueId, resolvedPath);
+                        
+                        return $"✅ Запущено выполнение всех задач из файла {Path.GetFileName(resolvedPath)}\n\n" +
+                               $"Следите за прогрессом в сообщениях ниже. Вы можете остановить выполнение в любой момент.";
+                    }
 
                 case AgentCommandType.StopExecution:
                     _logger.LogInformation("Остановка выполнения задач для диалога {DialogueId}", dialogueId);

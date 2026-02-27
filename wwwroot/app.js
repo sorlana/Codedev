@@ -3,6 +3,9 @@ const API_BASE = '';
 let currentDialogueId = null;
 let isProcessing = false;
 let projects = [];
+let dialogues = []; // Глобальный список диалогов
+let dialogueGroups = []; // Глобальный список групп диалогов
+let currentGroupId = null; // ID текущей открытой группы для контекста
 let wsClient = null; // Глобальный экземпляр WebSocketClient
 let messageCache = null; // Глобальный экземпляр MessageCache
 let virtualList = null; // Глобальный экземпляр VirtualList
@@ -55,9 +58,12 @@ class WebSocketClient {
                 const timestamp = new Date().toISOString();
                 console.log(`[WebSocket] [${timestamp}] Соединение установлено`, event);
                 console.log(`[Monitoring] [${timestamp}] WebSocket connection established for dialogue ${this.dialogueId}`);
+                console.log(`[WebSocket] Установка this.isConnected = true`);
                 
                 this.isConnected = true;
                 this.reconnectAttempts = 0; // Сброс счетчика попыток
+                
+                console.log(`[WebSocket] После установки: this.isConnected =`, this.isConnected);
                 
                 // Уведомление о изменении статуса соединения
                 if (this.onConnectionChange) {
@@ -148,8 +154,19 @@ class WebSocketClient {
     
     // Отправка сообщения через WebSocket
     async sendMessage(type, payload) {
+        console.log('[WebSocket] sendMessage вызван');
+        console.log('[WebSocket] type:', type);
+        console.log('[WebSocket] payload:', payload);
+        console.log('[WebSocket] this.isConnected:', this.isConnected);
+        console.log('[WebSocket] this.ws:', this.ws);
+        console.log('[WebSocket] this.ws?.readyState:', this.ws?.readyState);
+        console.log('[WebSocket] WebSocket.OPEN:', WebSocket.OPEN);
+        
         if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
             console.warn('[WebSocket] Соединение не активно, сообщение не отправлено');
+            console.warn('[WebSocket] Детали: isConnected=', this.isConnected, 
+                        'ws=', this.ws, 
+                        'readyState=', this.ws?.readyState);
             return false;
         }
         
@@ -648,7 +665,7 @@ class VirtualList {
         if (item.id) {
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'message-delete-btn';
-            deleteBtn.innerHTML = '🗑️';
+            deleteBtn.innerHTML = '<span class="material-icons">delete</span>';
             deleteBtn.title = 'Удалить сообщение';
             deleteBtn.onclick = (e) => {
                 e.stopPropagation();
@@ -1330,7 +1347,7 @@ function updateDebugMetricsPanel() {
     switch (metrics.connectionStatus) {
         case 'connected':
             connectionColor = '#00ff00';
-            connectionText = 'WebSocket подключен';
+            connectionText = 'WebSocket';
             break;
         case 'disconnected':
             connectionColor = '#ff0000';
@@ -1452,7 +1469,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     validateModelConnection();
     loadProjects();
-    loadDialogues();
+    loadDialogueGroups();
     setupEventListeners();
 });
 
@@ -1463,35 +1480,48 @@ async function loadProjects() {
         const response = await fetch(`${API_BASE}/api/projects`);
         projects = await response.json();
         
-        updateProjectSelector();
+        console.log('[Projects] Загружено проектов:', projects.length);
+        
+        // Автоматически выбираем проект, если он единственный и не выбран
+        if (projects.length === 1 && !projects[0].isSelected) {
+            console.log('[Projects] Автоматически выбираем единственный проект:', projects[0].name);
+            await selectProject(projects[0].id);
+        } else {
+            updateProjectSelector();
+        }
     } catch (error) {
         console.error('Error loading projects:', error);
     }
 }
 
 function updateProjectSelector() {
-    const selector = document.getElementById('project-selector');
+    const displayInput = document.getElementById('selected-project-display');
     
-    if (!selector) {
-        console.warn('[Projects] Селектор проектов не найден');
+    if (!displayInput) {
+        console.warn('[Projects] Поле отображения проекта не найдено');
         return;
     }
     
     if (projects.length === 0) {
-        selector.innerHTML = '<option value="">Нет проектов</option>';
+        displayInput.value = 'Нет проектов';
+        displayInput.style.color = '#999';
         return;
     }
     
     // Находим выбранный проект
     const selectedProject = projects.find(p => p.isSelected);
     
-    selector.innerHTML = projects.map(p => `
-        <option value="${p.id}" ${p.isSelected ? 'selected' : ''}>
-            ${escapeHtml(p.name)}
-        </option>
-    `).join('');
-    
-    console.log(`[Projects] Селектор обновлен. Выбран проект: ${selectedProject ? selectedProject.name : 'нет'}`);
+    if (selectedProject) {
+        displayInput.value = selectedProject.name;
+        displayInput.style.color = '#000';
+        displayInput.title = selectedProject.path;
+        console.log(`[Projects] Отображен выбранный проект: ${selectedProject.name}`);
+    } else {
+        displayInput.value = 'Проект не выбран';
+        displayInput.style.color = '#999';
+        displayInput.title = '';
+        console.log('[Projects] Проект не выбран');
+    }
 }
 
 async function selectProject(projectId) {
@@ -1517,7 +1547,7 @@ async function selectProject(projectId) {
         await loadProjects();
         
         // Перезагружаем диалоги для нового проекта
-        await loadDialogues();
+        await loadDialogueGroups();
         
         // Очищаем текущий диалог, если он не относится к выбранному проекту
         if (currentDialogueId) {
@@ -1569,13 +1599,46 @@ function renderProjectList() {
     }
     
     listElement.innerHTML = projects.map(p => `
-        <div class="project-list-item">
-            <span class="project-name">${escapeHtml(p.name)}</span>
-            <button class="delete-project-btn" onclick="deleteProject(${p.id})">
+        <div class="project-list-item" style="display: flex; align-items: center; padding: 12px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 8px; background: ${p.isSelected ? '#e7f3ff' : 'white'};">
+            <input 
+                type="radio" 
+                name="project-selection" 
+                value="${p.id}" 
+                ${p.isSelected ? 'checked' : ''}
+                style="margin-right: 12px; cursor: pointer;"
+            />
+            <div style="flex: 1;">
+                <div style="font-weight: 500;">${escapeHtml(p.name)}</div>
+                <div style="font-size: 12px; color: #666;">${escapeHtml(p.path)}</div>
+            </div>
+            <button class="delete-project-btn" onclick="deleteProject(${p.id})" style="padding: 4px 8px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
                 🗑️
             </button>
         </div>
     `).join('');
+}
+
+/**
+ * Выбор проекта из модального окна
+ */
+async function selectProjectFromModal() {
+    const selectedRadio = document.querySelector('input[name="project-selection"]:checked');
+    
+    if (!selectedRadio) {
+        alert('Выберите проект из списка');
+        return;
+    }
+    
+    const projectId = parseInt(selectedRadio.value);
+    console.log('[Projects] Выбран проект из модального окна:', projectId);
+    
+    try {
+        await selectProject(projectId);
+        closeProjectModal();
+    } catch (error) {
+        console.error('[Projects] Ошибка выбора проекта:', error);
+        alert('Ошибка выбора проекта: ' + error.message);
+    }
 }
 
 async function addProject() {
@@ -1620,13 +1683,19 @@ async function deleteProject(projectId) {
 }
 
 function setupEventListeners() {
-    document.getElementById('create-dialogue-button').addEventListener('click', createDialogue);
+    document.getElementById('create-dialogue-group-button').addEventListener('click', createDialogueGroup);
     document.getElementById('send-button').addEventListener('click', sendMessage);
     
     // Обработчик кнопки запуска модели
     const startModelButton = document.getElementById('start-model-button');
     if (startModelButton) {
         startModelButton.addEventListener('click', startOllamaModel);
+    }
+    
+    // Обработчик кнопки переподключения WebSocket
+    const reconnectButton = document.getElementById('reconnect-websocket-button');
+    if (reconnectButton) {
+        reconnectButton.addEventListener('click', reconnectWebSocket);
     }
     
     const promptInput = document.getElementById('prompt-input');
@@ -1666,47 +1735,114 @@ function setupEventListeners() {
     }
 }
 
-async function loadDialogues() {
+async function loadDialogueGroups() {
     try {
-        const response = await fetch(`${API_BASE}/api/dialogues`);
-        const dialogues = await response.json();
+        // Загружаем группы
+        const groupsResponse = await fetch(`${API_BASE}/api/dialogue-groups`);
+        dialogueGroups = await groupsResponse.json();
+        
+        // Загружаем все диалоги
+        const dialoguesResponse = await fetch(`${API_BASE}/api/dialogues`);
+        dialogues = await dialoguesResponse.json();
         
         const listElement = document.getElementById('dialogue-list');
         
-        if (dialogues.length === 0) {
-            listElement.innerHTML = '<div class="empty-state">Нет диалогов. Создайте новый.</div>';
-            return;
+        // Разделяем диалоги на группированные и без группы
+        const groupedDialogues = dialogues.filter(d => d.dialogueGroupId != null);
+        const ungroupedDialogues = dialogues.filter(d => d.dialogueGroupId == null);
+        
+        let html = '';
+        
+        // Отображаем группы
+        if (dialogueGroups.length > 0) {
+            dialogueGroups.forEach(group => {
+                const groupDialogues = dialogues.filter(d => d.dialogueGroupId === group.id);
+                const isCollapsed = group.isCollapsed ? 'collapsed' : '';
+                
+                html += `
+                    <div class="dialogue-group ${isCollapsed}" data-group-id="${group.id}">
+                        <div class="dialogue-group-header" onclick="toggleGroup(${group.id})">
+                            <span class="group-toggle-icon material-icons">expand_more</span>
+                            <span class="group-name">${escapeHtml(group.name)}</span>
+                            <div class="group-actions" onclick="event.stopPropagation()">
+                                <button class="group-action-btn add" onclick="createDialogueInGroup(${group.id})" title="Добавить диалог"><span class="material-icons">add</span></button>
+                                <button class="group-action-btn context" onclick="openContextModal(${group.id})" title="Контекст"><span class="material-icons">description</span></button>
+                                <button class="group-action-btn rename" onclick="renameDialogueGroup(${group.id})" title="Переименовать группу"><span class="material-icons">edit</span></button>
+                                <button class="group-action-btn delete" onclick="deleteDialogueGroup(${group.id})" title="Удалить группу"><span class="material-icons">delete</span></button>
+                            </div>
+                        </div>
+                        <div class="dialogue-group-content">
+                            ${groupDialogues.length > 0 ? groupDialogues.map(d => `
+                                <div class="dialogue-item ${d.id === currentDialogueId ? 'active' : ''}" data-id="${d.id}">
+                                    <div class="dialogue-info" onclick="selectDialogue(${d.id})">
+                                        <div>Диалог #${d.id}</div>
+                                        <div class="dialogue-path">${new Date(d.createdAt).toLocaleString()}</div>
+                                    </div>
+                                    <button class="dialogue-delete" onclick="deleteDialogue(event, ${d.id})" title="Удалить диалог"><span class="material-icons">delete</span></button>
+                                </div>
+                            `).join('') : '<div class="empty-state">Нет диалогов в группе</div>'}
+                        </div>
+                    </div>
+                `;
+            });
         }
         
-        listElement.innerHTML = dialogues.map(d => `
-            <div class="dialogue-item" data-id="${d.id}">
-                <div class="dialogue-info" onclick="selectDialogue(${d.id})">
-                    <div>Диалог #${d.id}</div>
-                    <div class="dialogue-path">${d.projectPath}</div>
+        // Отображаем диалоги без группы
+        if (ungroupedDialogues.length > 0) {
+            html += `
+                <div class="ungrouped-section">
+                    <div class="ungrouped-header">Без группы</div>
+                    ${ungroupedDialogues.map(d => `
+                        <div class="dialogue-item ${d.id === currentDialogueId ? 'active' : ''}" data-id="${d.id}">
+                            <div class="dialogue-info" onclick="selectDialogue(${d.id})">
+                                <div>Диалог #${d.id}</div>
+                                <div class="dialogue-path">${d.projectPath}</div>
+                            </div>
+                            <button class="dialogue-delete" onclick="deleteDialogue(event, ${d.id})" title="Удалить диалог"><span class="material-icons">delete</span></button>
+                        </div>
+                    `).join('')}
                 </div>
-                <button class="dialogue-delete" onclick="deleteDialogue(event, ${d.id})" title="Удалить диалог">
-                    🗑️
-                </button>
-            </div>
-        `).join('');
-        
-        if (dialogues.length > 0 && !currentDialogueId) {
-            selectDialogue(dialogues[0].id);
+            `;
         }
+        
+        if (html === '') {
+            html = '<div class="empty-state">Нет групп и диалогов. Создайте группу.</div>';
+        }
+        
+        listElement.innerHTML = html;
+        
+        // Проверка существования текущего диалога
+        if (currentDialogueId) {
+            const dialogueExists = dialogues.some(d => d.id === currentDialogueId);
+            if (!dialogueExists) {
+                console.log('[UI] Текущий диалог не найден в базе');
+                currentDialogueId = null;
+                document.getElementById('message-list').innerHTML = '<div class="empty-state">Выберите диалог из списка</div>';
+            }
+        }
+        
     } catch (error) {
-        console.error('Error loading dialogues:', error);
-        showError('Ошибка загрузки диалогов');
+        console.error('Error loading dialogue groups:', error);
+        showError('Ошибка загрузки групп диалогов');
     }
 }
 
 async function createDialogue() {
+    console.log('[UI] Попытка создания диалога...');
+    console.log('[UI] Список проектов:', projects);
+    
     // Получаем выбранный проект
     const selectedProject = projects.find(p => p.isSelected);
     
+    console.log('[UI] Выбранный проект:', selectedProject);
+    
     if (!selectedProject) {
+        console.error('[UI] Проект не выбран!');
         alert('Выберите проект из списка');
         return;
     }
+    
+    console.log('[UI] Отправка запроса на создание диалога для проекта:', selectedProject.path);
     
     try {
         const response = await fetch(`${API_BASE}/api/dialogues`, {
@@ -1715,17 +1851,21 @@ async function createDialogue() {
             body: JSON.stringify({ projectPath: selectedProject.path })
         });
         
+        console.log('[UI] Ответ сервера:', response.status, response.statusText);
+        
         if (!response.ok) {
             const error = await response.text();
+            console.error('[UI] Ошибка от сервера:', error);
             throw new Error(error);
         }
         
         const dialogue = await response.json();
+        console.log('[UI] Диалог создан:', dialogue);
         
-        await loadDialogues();
+        await loadDialogueGroups();
         selectDialogue(dialogue.id);
     } catch (error) {
-        console.error('Error creating dialogue:', error);
+        console.error('[UI] Ошибка создания диалога:', error);
         alert('Ошибка создания диалога: ' + error.message);
     }
 }
@@ -1756,7 +1896,7 @@ async function deleteDialogue(event, dialogueId) {
         }
         
         // Reload the dialogue list
-        await loadDialogues();
+        await loadDialogueGroups();
     } catch (error) {
         console.error('Error deleting dialogue:', error);
         alert('Ошибка удаления диалога: ' + error.message);
@@ -2224,6 +2364,12 @@ async function loadMessages(dialogueId) {
             
             const cacheDisplayTime = performance.now() - cacheStartTime;
             console.log(`[Monitoring] Кэшированные сообщения отображены за ${cacheDisplayTime.toFixed(2)}ms`);
+            
+            // Автопрокрутка к последнему сообщению
+            setTimeout(() => {
+                const messageList = document.getElementById('message-list');
+                messageList.scrollTop = messageList.scrollHeight;
+            }, 100);
         }
         
         // Шаг 2: Запрос обновлений с сервера в фоновом режиме
@@ -2285,8 +2431,20 @@ async function loadMessages(dialogueId) {
             if (messageCache) {
                 messageCache.cacheMessages(dialogueId, dialogue.messages);
             }
+            
+            // Автопрокрутка к последнему сообщению
+            setTimeout(() => {
+                const messageList = document.getElementById('message-list');
+                messageList.scrollTop = messageList.scrollHeight;
+            }, 100);
         } else {
             console.log('[MessageCache] Изменений не обнаружено, UI не обновляется');
+            
+            // Автопрокрутка к последнему сообщению даже если нет изменений
+            setTimeout(() => {
+                const messageList = document.getElementById('message-list');
+                messageList.scrollTop = messageList.scrollHeight;
+            }, 100);
         }
         
     } catch (error) {
@@ -2381,19 +2539,45 @@ function showStatusMessage(message, type) {
 }
 
 async function sendMessage() {
+    console.log('[UI] sendMessage вызвана');
+    console.log('[UI] currentDialogueId:', currentDialogueId);
+    console.log('[UI] isProcessing:', isProcessing);
+    console.log('[UI] wsClient:', wsClient);
+    console.log('[UI] wsClient.isConnected:', wsClient?.isConnected);
+    console.log('[UI] wsClient.isUsingHttp:', wsClient?.isUsingHttp);
+    
     if (!currentDialogueId) {
         alert('Выберите диалог');
         return;
     }
     
     if (isProcessing) {
+        console.log('[UI] Отмена: уже обрабатывается другое сообщение');
         return;
+    }
+    
+    // Проверяем, есть ли у текущего диалога группа с контекстом
+    const currentDialogue = dialogues.find(d => d.id === currentDialogueId);
+    if (currentDialogue && currentDialogue.dialogueGroupId) {
+        const group = dialogueGroups.find(g => g.id === currentDialogue.dialogueGroupId);
+        if (group) {
+            const hasContext = group.requirements || group.design || group.tasks;
+            if (hasContext) {
+                console.log(`[Context] Диалог использует контекст группы "${group.name}"`);
+                if (group.requirements) console.log('[Context] ✓ Requirements загружены');
+                if (group.design) console.log('[Context] ✓ Design загружен');
+                if (group.tasks) console.log('[Context] ✓ Tasks загружены');
+            }
+        }
     }
     
     const input = document.getElementById('prompt-input');
     const content = input.value.trim();
     
+    console.log('[UI] Содержимое сообщения:', content);
+    
     if (!content) {
+        console.log('[UI] Отмена: пустое сообщение');
         return;
     }
     
@@ -2652,6 +2836,10 @@ async function validateModelConnection() {
     const modelLabel = document.querySelector('.model-status-label');
     const startButton = document.getElementById('start-model-button');
     
+    const reasoningIndicator = document.getElementById('reasoning-model-status-indicator');
+    const reasoningIcon = document.querySelector('.reasoning-model-status-icon');
+    const reasoningLabel = document.querySelector('.reasoning-model-status-label');
+    
     console.log('[ModelValidation] Начало проверки подключения к модели...');
     
     if (!modelIndicator || !modelLabel || !startButton) {
@@ -2668,13 +2856,15 @@ async function validateModelConnection() {
         if (result.isConnected) {
             // Модель активна
             modelIndicator.className = 'model-active';
-            modelLabel.textContent = `Модель активна: ${result.modelName || 'неизвестно'}`;
+            modelLabel.textContent = result.modelName || 'неизвестно';
+            if (modelIcon) modelIcon.title = 'Модель активна';
             startButton.style.display = 'none';
             console.log('[ModelValidation] ✓ Модель активна:', result.modelName);
         } else {
             // Модель неактивна
             modelIndicator.className = 'model-inactive';
-            modelLabel.textContent = result.errorMessage || 'Модель недоступна';
+            modelLabel.textContent = result.modelName || 'Модель';
+            if (modelIcon) modelIcon.title = result.errorMessage || 'Модель недоступна';
             
             console.warn('[ModelValidation] ✗ Модель неактивна:', result.errorMessage);
             
@@ -2690,10 +2880,47 @@ async function validateModelConnection() {
             
             showStartupWarning(result.errorMessage);
         }
+        
+        // Проверка reasoning модели
+        if (reasoningIndicator && reasoningLabel) {
+            try {
+                const reasoningResponse = await fetch(`${API_BASE}/api/startup/validate-reasoning`);
+                const reasoningResult = await reasoningResponse.json();
+                
+                console.log('[ModelValidation] Результат проверки reasoning модели:', reasoningResult);
+                
+                const startReasoningButton = document.getElementById('start-reasoning-model-button');
+                
+                if (reasoningResult.isConnected) {
+                    reasoningIndicator.className = 'model-active';
+                    reasoningLabel.textContent = reasoningResult.modelName || 'неизвестно';
+                    if (reasoningIcon) reasoningIcon.title = 'Reasoning модель активна';
+                    if (startReasoningButton) startReasoningButton.style.display = 'none';
+                    console.log('[ModelValidation] ✓ Reasoning модель активна:', reasoningResult.modelName);
+                } else {
+                    reasoningIndicator.className = 'model-inactive';
+                    reasoningLabel.textContent = reasoningResult.modelName || 'Reasoning модель';
+                    if (reasoningIcon) reasoningIcon.title = reasoningResult.errorMessage || 'Reasoning модель недоступна';
+                    console.warn('[ModelValidation] ✗ Reasoning модель неактивна:', reasoningResult.errorMessage);
+                    
+                    // Показываем кнопку запуска всегда, когда модель неактивна
+                    if (startReasoningButton) {
+                        startReasoningButton.style.display = 'block';
+                        console.log('[ModelValidation] Показана кнопка запуска reasoning модели');
+                    }
+                }
+            } catch (error) {
+                console.error('[ModelValidation] Ошибка при проверке reasoning модели:', error);
+                reasoningIndicator.className = 'model-inactive';
+                reasoningLabel.textContent = 'Reasoning модель';
+                if (reasoningIcon) reasoningIcon.title = 'Ошибка проверки reasoning модели';
+            }
+        }
     } catch (error) {
         console.error('[ModelValidation] Ошибка при проверке подключения:', error);
         modelIndicator.className = 'model-inactive';
-        modelLabel.textContent = 'Ошибка проверки';
+        modelLabel.textContent = 'Модель';
+        if (modelIcon) modelIcon.title = 'Ошибка проверки';
         startButton.style.display = 'none';
     }
 }
@@ -2762,56 +2989,100 @@ async function startOllamaModel() {
     }
 }
 
-function showHelp() {
-    const helpText = `
-📖 Краткая справка по использованию
-
-⚠️ ВАЖНО: Команды работают с проектом, который вы указали при создании диалога!
-
-🔹 ПРИМЕРЫ КОМАНД:
-
-Просмотр кода:
-• "Покажи файл Program.cs"
-• "Покажи файл Services/UserService.cs"
-• "Найди класс UserService"
-• "Покажи методы класса OrderController"
-• "Покажи структуру проекта"
-
-Рефакторинг:
-• "Переименуй метод GetUser в FetchUserData"
-• "Извлеки этот код в отдельный метод"
-• "Добавь проверку на null в метод ProcessOrder"
-
-Создание кода:
-• "Создай класс EmailService в папке Services"
-• "Добавь метод SendEmail в класс EmailService"
-• "Создай интерфейс IRepository"
-
-Работа с файлами:
-• "Покажи все файлы в папке Services"
-• "Покажи все .cs файлы"
-• "Создай папку Models"
-
-🔹 СОВЕТЫ:
-
-✅ Указывайте относительные пути от корня проекта
-✅ Для вложенных файлов: "Services/UserService.cs"
-✅ Будьте конкретны в командах
-✅ Используйте чекпоинты для отката
-
-⚙️ НАСТРОЙКИ:
-
-Нажмите кнопку ⚙️ для настройки модели:
-• Provider - облачные модели (OpenAI, DeepSeek, F5AI)
-• Local - локальные модели (Ollama)
-
-📚 Полная документация: USAGE_GUIDE.md
-    `.trim();
+// Функция для запуска reasoning модели Ollama
+async function startReasoningModel() {
+    const btn = document.getElementById('start-reasoning-model-button');
+    if (!btn) return;
     
-    alert(helpText);
+    const originalText = btn.textContent;
+    btn.textContent = '⏳ Запуск...';
+    btn.disabled = true;
+    
+    try {
+        console.log('[StartReasoningModel] Отправка запроса на /api/ollama/start-reasoning');
+        
+        const response = await fetch('/api/ollama/start-reasoning', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        console.log('[StartReasoningModel] Получен ответ:', response.status, response.statusText);
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('[StartReasoningModel] Успешный результат:', result);
+            
+            btn.textContent = '✓ Запущено!';
+            btn.style.background = '#28a745';
+            
+            // Ждем 5 секунд, чтобы модель полностью загрузилась в Ollama
+            console.log('[StartReasoningModel] Ожидание загрузки модели (5 секунд)...');
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            
+            // Повторная валидация моделей
+            console.log('[StartReasoningModel] Повторная валидация моделей...');
+            await validateModelConnection();
+            
+            // Сброс кнопки
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                btn.style.background = '';
+            }, 2000);
+        } else {
+            console.error('[StartReasoningModel] Ошибка HTTP:', response.status);
+            
+            let errorMessage = 'Неизвестная ошибка';
+            const contentType = response.headers.get('content-type');
+            
+            console.log('[StartReasoningModel] Content-Type:', contentType);
+            
+            try {
+                if (contentType && contentType.includes('application/json')) {
+                    const errorData = await response.json();
+                    console.error('[StartReasoningModel] JSON ошибка:', errorData);
+                    errorMessage = errorData.message || errorData.detail || errorData.title || JSON.stringify(errorData);
+                } else if (contentType && contentType.includes('application/problem+json')) {
+                    const errorData = await response.json();
+                    console.error('[StartReasoningModel] Problem JSON:', errorData);
+                    errorMessage = errorData.detail || errorData.title || JSON.stringify(errorData);
+                } else {
+                    const textError = await response.text();
+                    console.error('[StartReasoningModel] Text ошибка:', textError);
+                    errorMessage = textError || `HTTP ${response.status}: ${response.statusText}`;
+                }
+            } catch (parseError) {
+                console.error('[StartReasoningModel] Ошибка парсинга ответа:', parseError);
+                errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            }
+            
+            btn.textContent = '✗ Ошибка';
+            btn.style.background = '#dc3545';
+            
+            console.error('[StartReasoningModel] Финальное сообщение об ошибке:', errorMessage);
+            alert(`Не удалось запустить reasoning модель:\n\n${errorMessage}\n\nПроверьте:\n1. Установлена ли Ollama\n2. Запущен ли сервис Ollama\n3. Доступна ли модель deepseek-r1:7b`);
+            
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                btn.style.background = '';
+            }, 3000);
+        }
+    } catch (error) {
+        btn.textContent = '✗ Ошибка';
+        btn.style.background = '#dc3545';
+        
+        console.error('[StartReasoningModel] Исключение:', error);
+        console.error('[StartReasoningModel] Stack trace:', error.stack);
+        alert(`Ошибка запуска: ${error.message}\n\nПроверьте консоль браузера и логи сервера для подробностей.`);
+        
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.disabled = false;
+            btn.style.background = '';
+        }, 3000);
+    }
 }
-
-
 
 // Функции управления агентским режимом выполнения задач
 
@@ -3242,51 +3513,503 @@ function updateConnectionStatus(status, data) {
         return;
     }
     
+    // Получаем кнопку переподключения
+    const reconnectButton = document.getElementById('reconnect-websocket-button');
+    
     // Удаление всех классов статуса
     indicator.className = '';
     
     // Обновление метрики статуса соединения
     updatePerformanceMetric('connectionStatus', status);
     
+    // Получаем иконку статуса
+    const statusIcon = indicator.querySelector('.status-icon');
+    
     // Установка нового статуса и текста
     switch (status) {
         case 'connected':
             indicator.classList.add('status-connected');
-            statusLabel.textContent = 'WebSocket подключен';
+            statusLabel.textContent = 'WebSocket';
+            if (statusIcon) statusIcon.title = 'Подключено';
+            if (reconnectButton) reconnectButton.style.display = 'none';
             console.log('[UI] Статус обновлен: WebSocket подключен');
             break;
             
         case 'disconnected':
             indicator.classList.add('status-disconnected');
-            statusLabel.textContent = 'Отключено';
+            statusLabel.textContent = 'WebSocket';
+            if (statusIcon) statusIcon.title = 'Отключено';
+            if (reconnectButton) reconnectButton.style.display = 'inline-block';
             console.log('[UI] Статус обновлен: Отключено');
             break;
             
         case 'error':
             indicator.classList.add('status-error');
-            statusLabel.textContent = 'Ошибка соединения';
+            statusLabel.textContent = 'WebSocket';
+            if (statusIcon) statusIcon.title = 'Ошибка соединения';
+            if (reconnectButton) reconnectButton.style.display = 'inline-block';
             console.log('[UI] Статус обновлен: Ошибка соединения');
             break;
             
         case 'reconnecting':
             indicator.classList.add('status-reconnecting');
+            statusLabel.textContent = 'WebSocket';
             if (data && data.attempt) {
-                statusLabel.textContent = `Переподключение (попытка ${data.attempt}/5)...`;
+                if (statusIcon) statusIcon.title = `Переподключение (попытка ${data.attempt}/5)...`;
             } else {
-                statusLabel.textContent = 'Переподключение...';
+                if (statusIcon) statusIcon.title = 'Переподключение...';
             }
+            if (reconnectButton) reconnectButton.style.display = 'none';
             console.log('[UI] Статус обновлен: Переподключение', data);
             break;
             
         case 'http_fallback':
             indicator.classList.add('status-http');
-            statusLabel.textContent = 'HTTP режим';
+            statusLabel.textContent = 'WebSocket';
+            if (statusIcon) statusIcon.title = 'HTTP режим';
+            if (reconnectButton) reconnectButton.style.display = 'inline-block';
             console.log('[UI] Статус обновлен: HTTP режим');
             break;
             
         default:
             indicator.classList.add('status-disconnected');
-            statusLabel.textContent = 'Неизвестный статус';
+            statusLabel.textContent = 'WebSocket';
+            if (statusIcon) statusIcon.title = 'Неизвестный статус';
+            if (reconnectButton) reconnectButton.style.display = 'inline-block';
             console.warn('[UI] Неизвестный статус соединения:', status);
+    }
+}
+
+/**
+ * Функция для ручного переподключения WebSocket
+ */
+async function reconnectWebSocket() {
+    console.log('[UI] Ручное переподключение WebSocket...');
+    
+    if (!currentDialogueId) {
+        alert('Сначала выберите диалог');
+        return;
+    }
+    
+    // Отключаем старое соединение если есть
+    if (wsClient) {
+        wsClient.disconnect();
+        wsClient = null;
+    }
+    
+    // Создаем новое соединение
+    wsClient = new WebSocketClient(currentDialogueId);
+    
+    // Установка обработчика изменения статуса соединения
+    wsClient.onConnectionChange = (status, data) => {
+        console.log(`[UI] Статус WebSocket соединения изменен: ${status}`, data);
+        updateConnectionStatus(status, data);
+    };
+    
+    // Регистрация обработчиков входящих сообщений
+    registerWebSocketHandlers(wsClient);
+    
+    // Установка WebSocket соединения
+    try {
+        await wsClient.connect();
+        console.log('[UI] WebSocket переподключен успешно');
+    } catch (error) {
+        console.error('[UI] Ошибка переподключения WebSocket:', error);
+        alert('Не удалось переподключить WebSocket: ' + error.message);
+    }
+}
+
+
+// ========================================
+// Утилиты для отладки и сброса состояния
+// ========================================
+
+/**
+ * Сброс состояния приложения (очистка localStorage и перезагрузка)
+ * Используйте в консоли браузера: resetAppState()
+ */
+function resetAppState() {
+    console.log('[Debug] Сброс состояния приложения...');
+    
+    // Очистка localStorage
+    if (messageCache) {
+        console.log('[Debug] Очистка кэша сообщений...');
+        Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('msg_cache_')) {
+                localStorage.removeItem(key);
+            }
+        });
+    }
+    
+    if (draftManager) {
+        console.log('[Debug] Очистка черновиков...');
+        Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('draft_')) {
+                localStorage.removeItem(key);
+            }
+        });
+    }
+    
+    // Очистка других данных
+    console.log('[Debug] Очистка других данных localStorage...');
+    localStorage.clear();
+    
+    // Отключение WebSocket
+    if (wsClient) {
+        console.log('[Debug] Отключение WebSocket...');
+        wsClient.disconnect();
+    }
+    
+    console.log('[Debug] Состояние очищено. Перезагрузка страницы...');
+    
+    // Перезагрузка страницы
+    setTimeout(() => {
+        window.location.reload();
+    }, 500);
+}
+
+// Делаем функцию доступной глобально для использования из консоли
+window.resetAppState = resetAppState;
+
+console.log('[Debug] Функция resetAppState() доступна в консоли браузера');
+
+
+// ============================================
+// Функции для работы с группами диалогов
+// ============================================
+
+/**
+ * Создание новой группы диалогов
+ */
+async function createDialogueGroup() {
+    console.log('[UI] Попытка создания группы диалогов...');
+    
+    // Проверка выбранного проекта
+    const selectedProject = projects.find(p => p.isSelected);
+    
+    if (!selectedProject) {
+        console.error('[UI] Проект не выбран!');
+        alert('Выберите проект из списка');
+        return;
+    }
+    
+    // Запрашиваем название группы
+    const groupName = prompt('Введите название группы диалогов:');
+    
+    if (!groupName || groupName.trim() === '') {
+        console.log('[UI] Создание группы отменено');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/dialogue-groups`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                name: groupName.trim(),
+                projectPath: selectedProject.path 
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error);
+        }
+        
+        const group = await response.json();
+        console.log('[UI] Группа создана:', group);
+        
+        // Перезагружаем список групп и диалогов
+        await loadDialogueGroups();
+        
+    } catch (error) {
+        console.error('[UI] Ошибка создания группы:', error);
+        alert('Ошибка создания группы: ' + error.message);
+    }
+}
+
+/**
+ * Переключение состояния группы (свернуть/развернуть)
+ */
+async function toggleGroup(groupId) {
+    console.log('[UI] Переключение группы:', groupId);
+    
+    const groupElement = document.querySelector(`.dialogue-group[data-group-id="${groupId}"]`);
+    if (!groupElement) {
+        console.error('[UI] Элемент группы не найден');
+        return;
+    }
+    
+    // Переключаем класс collapsed
+    const isCollapsed = groupElement.classList.toggle('collapsed');
+    
+    try {
+        // Находим группу в массиве
+        const group = dialogueGroups.find(g => g.id === groupId);
+        if (!group) {
+            console.error('[UI] Группа не найдена в массиве');
+            return;
+        }
+        
+        // Отправляем обновление на сервер
+        const response = await fetch(`${API_BASE}/api/dialogue-groups/${groupId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                name: group.name,
+                isCollapsed: isCollapsed 
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Не удалось обновить состояние группы');
+        }
+        
+        console.log('[UI] Состояние группы обновлено:', isCollapsed ? 'свернута' : 'развернута');
+        
+    } catch (error) {
+        console.error('[UI] Ошибка обновления состояния группы:', error);
+        // Откатываем изменение в UI
+        groupElement.classList.toggle('collapsed');
+    }
+}
+
+/**
+ * Создание диалога в группе
+ */
+async function createDialogueInGroup(groupId) {
+    console.log('[UI] Создание диалога в группе:', groupId);
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/dialogue-groups/${groupId}/dialogues`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error);
+        }
+        
+        const dialogue = await response.json();
+        console.log('[UI] Диалог создан в группе:', dialogue);
+        
+        // Перезагружаем список групп и диалогов
+        await loadDialogueGroups();
+        
+        // Выбираем новый диалог
+        selectDialogue(dialogue.id);
+        
+    } catch (error) {
+        console.error('[UI] Ошибка создания диалога в группе:', error);
+        alert('Ошибка создания диалога: ' + error.message);
+    }
+}
+
+/**
+ * Переименование группы диалогов
+ */
+async function renameDialogueGroup(groupId) {
+    console.log('[UI] Попытка переименования группы:', groupId);
+    
+    // Находим группу в массиве
+    const group = dialogueGroups.find(g => g.id === groupId);
+    if (!group) {
+        console.error('[UI] Группа не найдена');
+        return;
+    }
+    
+    // Запрашиваем новое название
+    const newName = prompt('Введите новое название группы:', group.name);
+    
+    if (!newName || newName.trim() === '') {
+        console.log('[UI] Переименование отменено');
+        return;
+    }
+    
+    // Если название не изменилось, ничего не делаем
+    if (newName.trim() === group.name) {
+        console.log('[UI] Название не изменилось');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/dialogue-groups/${groupId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                name: newName.trim(),
+                isCollapsed: group.isCollapsed 
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error);
+        }
+        
+        console.log('[UI] Группа переименована');
+        
+        // Перезагружаем список групп и диалогов
+        await loadDialogueGroups();
+        
+        // Показываем уведомление
+        showStatusMessage('Группа переименована', 'success');
+        
+    } catch (error) {
+        console.error('[UI] Ошибка переименования группы:', error);
+        alert('Ошибка переименования группы: ' + error.message);
+    }
+}
+
+/**
+ * Удаление группы диалогов
+ */
+async function deleteDialogueGroup(groupId) {
+    console.log('[UI] Попытка удаления группы:', groupId);
+    
+    if (!confirm('Вы уверены, что хотите удалить эту группу? Все диалоги в группе будут также удалены. Это действие нельзя отменить.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/dialogue-groups/${groupId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error);
+        }
+        
+        console.log('[UI] Группа удалена');
+        
+        // Если удалили группу где был выбранный диалог, очищаем экран
+        if (currentDialogueId) {
+            const currentDialogue = dialogues.find(d => d.id === currentDialogueId);
+            if (currentDialogue && currentDialogue.dialogueGroupId === groupId) {
+                currentDialogueId = null;
+                document.getElementById('message-list').innerHTML = '<div class="empty-state">Выберите диалог</div>';
+                document.getElementById('checkpoint-list').innerHTML = '<div class="empty-state">Нет чекпоинтов</div>';
+            }
+        }
+        
+        // Перезагружаем список групп и диалогов
+        await loadDialogueGroups();
+        
+    } catch (error) {
+        console.error('[UI] Ошибка удаления группы:', error);
+        alert('Ошибка удаления группы: ' + error.message);
+    }
+}
+
+/**
+ * Открытие модального окна контекста группы
+ */
+async function openContextModal(groupId) {
+    console.log('[UI] Открытие модального окна контекста для группы:', groupId);
+    
+    // Сохраняем ID группы для последующего сохранения
+    currentGroupId = groupId;
+    
+    // Находим группу в массиве
+    const group = dialogueGroups.find(g => g.id === groupId);
+    if (!group) {
+        console.error('[UI] Группа не найдена');
+        return;
+    }
+    
+    // Заполняем поля модального окна
+    const requirementsTextarea = document.getElementById('context-requirements');
+    const designTextarea = document.getElementById('context-design');
+    const tasksTextarea = document.getElementById('context-tasks');
+    
+    if (requirementsTextarea) requirementsTextarea.value = group.requirements || '';
+    if (designTextarea) designTextarea.value = group.design || '';
+    if (tasksTextarea) tasksTextarea.value = group.tasks || '';
+    
+    // Показываем модальное окно
+    const modalOverlay = document.getElementById('context-modal-overlay');
+    if (modalOverlay) {
+        modalOverlay.classList.add('active');
+    }
+    
+    console.log('[UI] Модальное окно контекста открыто');
+}
+
+/**
+ * Закрытие модального окна контекста
+ */
+function closeContextModal() {
+    console.log('[UI] Закрытие модального окна контекста');
+    
+    const modalOverlay = document.getElementById('context-modal-overlay');
+    if (modalOverlay) {
+        modalOverlay.classList.remove('active');
+    }
+    
+    // Очищаем ID текущей группы
+    currentGroupId = null;
+    
+    // Очищаем поля
+    const requirementsTextarea = document.getElementById('context-requirements');
+    const designTextarea = document.getElementById('context-design');
+    const tasksTextarea = document.getElementById('context-tasks');
+    
+    if (requirementsTextarea) requirementsTextarea.value = '';
+    if (designTextarea) designTextarea.value = '';
+    if (tasksTextarea) tasksTextarea.value = '';
+}
+
+/**
+ * Сохранение контекста группы
+ */
+async function saveGroupContext() {
+    console.log('[UI] Сохранение контекста группы:', currentGroupId);
+    
+    if (!currentGroupId) {
+        console.error('[UI] ID группы не установлен');
+        return;
+    }
+    
+    // Получаем значения из полей
+    const requirementsTextarea = document.getElementById('context-requirements');
+    const designTextarea = document.getElementById('context-design');
+    const tasksTextarea = document.getElementById('context-tasks');
+    
+    const requirements = requirementsTextarea ? requirementsTextarea.value : '';
+    const design = designTextarea ? designTextarea.value : '';
+    const tasks = tasksTextarea ? tasksTextarea.value : '';
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/dialogue-groups/${currentGroupId}/context`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                requirements: requirements,
+                design: design,
+                tasks: tasks
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error);
+        }
+        
+        console.log('[UI] Контекст группы сохранен');
+        
+        // Закрываем модальное окно
+        closeContextModal();
+        
+        // Перезагружаем список групп для обновления данных
+        await loadDialogueGroups();
+        
+        // Показываем уведомление
+        showStatusMessage('Контекст группы сохранен', 'success');
+        
+    } catch (error) {
+        console.error('[UI] Ошибка сохранения контекста:', error);
+        alert('Ошибка сохранения контекста: ' + error.message);
     }
 }

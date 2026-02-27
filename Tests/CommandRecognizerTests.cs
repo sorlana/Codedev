@@ -1,5 +1,6 @@
 using CSharpRefactoringAssistant.Models;
 using CSharpRefactoringAssistant.Services;
+using Microsoft.Extensions.Logging;
 
 namespace CSharpRefactoringAssistant.Tests;
 
@@ -8,6 +9,13 @@ namespace CSharpRefactoringAssistant.Tests;
 /// </summary>
 public static class CommandRecognizerTests
 {
+    // Вспомогательный метод для создания mock логгера
+    private static ILogger<CommandRecognizer> CreateMockLogger()
+    {
+        var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+        return loggerFactory.CreateLogger<CommandRecognizer>();
+    }
+
     public static void RunAllTests()
     {
         Console.WriteLine("\n" + new string('=', 60));
@@ -34,7 +42,7 @@ public static class CommandRecognizerTests
     private static void TestStartExecutionRussian()
     {
         Console.WriteLine("\nТест: Распознавание команды запуска (русский)");
-        var recognizer = new CommandRecognizer();
+        var recognizer = new CommandRecognizer(CreateMockLogger());
         
         var result = recognizer.TryRecognizeCommand(
             "начни выполнение задач из tasks.md",
@@ -62,7 +70,7 @@ public static class CommandRecognizerTests
     private static void TestStartExecutionEnglish()
     {
         Console.WriteLine("\nТест: Распознавание команды запуска (английский)");
-        var recognizer = new CommandRecognizer();
+        var recognizer = new CommandRecognizer(CreateMockLogger());
         
         var result = recognizer.TryRecognizeCommand(
             "execute tasks from file tasks.md",
@@ -90,7 +98,7 @@ public static class CommandRecognizerTests
     private static void TestStopExecutionRussian()
     {
         Console.WriteLine("\nТест: Распознавание команды остановки (русский)");
-        var recognizer = new CommandRecognizer();
+        var recognizer = new CommandRecognizer(CreateMockLogger());
         
         var result = recognizer.TryRecognizeCommand(
             "останови выполнение",
@@ -113,7 +121,7 @@ public static class CommandRecognizerTests
     private static void TestStopExecutionEnglish()
     {
         Console.WriteLine("\nТест: Распознавание команды остановки (английский)");
-        var recognizer = new CommandRecognizer();
+        var recognizer = new CommandRecognizer(CreateMockLogger());
         
         var result = recognizer.TryRecognizeCommand(
             "stop execution",
@@ -136,7 +144,7 @@ public static class CommandRecognizerTests
     private static void TestResumeExecutionRussian()
     {
         Console.WriteLine("\nТест: Распознавание команды возобновления (русский)");
-        var recognizer = new CommandRecognizer();
+        var recognizer = new CommandRecognizer(CreateMockLogger());
         
         var result = recognizer.TryRecognizeCommand(
             "продолжи выполнение",
@@ -159,7 +167,7 @@ public static class CommandRecognizerTests
     private static void TestResumeExecutionEnglish()
     {
         Console.WriteLine("\nТест: Распознавание команды возобновления (английский)");
-        var recognizer = new CommandRecognizer();
+        var recognizer = new CommandRecognizer(CreateMockLogger());
         
         var result = recognizer.TryRecognizeCommand(
             "resume execution",
@@ -182,7 +190,7 @@ public static class CommandRecognizerTests
     private static void TestShowStatusRussian()
     {
         Console.WriteLine("\nТест: Распознавание команды статуса (русский)");
-        var recognizer = new CommandRecognizer();
+        var recognizer = new CommandRecognizer(CreateMockLogger());
         
         var result = recognizer.TryRecognizeCommand(
             "покажи статус выполнения",
@@ -205,7 +213,7 @@ public static class CommandRecognizerTests
     private static void TestShowStatusEnglish()
     {
         Console.WriteLine("\nТест: Распознавание команды статуса (английский)");
-        var recognizer = new CommandRecognizer();
+        var recognizer = new CommandRecognizer(CreateMockLogger());
         
         var result = recognizer.TryRecognizeCommand(
             "show status",
@@ -228,7 +236,7 @@ public static class CommandRecognizerTests
     private static void TestExtractFilePath()
     {
         Console.WriteLine("\nТест: Извлечение пути к файлу");
-        var recognizer = new CommandRecognizer();
+        var recognizer = new CommandRecognizer(CreateMockLogger());
         
         // Тест с относительным путем
         var result1 = recognizer.TryRecognizeCommand(
@@ -258,7 +266,7 @@ public static class CommandRecognizerTests
     private static void TestCaseInsensitive()
     {
         Console.WriteLine("\nТест: Игнорирование регистра");
-        var recognizer = new CommandRecognizer();
+        var recognizer = new CommandRecognizer(CreateMockLogger());
         
         var result1 = recognizer.TryRecognizeCommand(
             "НАЧНИ ВЫПОЛНЕНИЕ ЗАДАЧ",
@@ -286,7 +294,7 @@ public static class CommandRecognizerTests
     private static void TestNonCommand()
     {
         Console.WriteLine("\nТест: Не-команда");
-        var recognizer = new CommandRecognizer();
+        var recognizer = new CommandRecognizer(CreateMockLogger());
         
         var result = recognizer.TryRecognizeCommand(
             "Привет, как дела? Расскажи о проекте.",

@@ -53,13 +53,52 @@ namespace CSharpRefactoringAssistant.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("DialogueGroupId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ProjectPath")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DialogueGroupId");
+
                     b.ToTable("Dialogues");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.DialogueGroup", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Design")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsCollapsed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectPath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Requirements")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Tasks")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("DialogueGroups");
                 });
 
             modelBuilder.Entity("CSharpRefactoringAssistant.Models.ExecutionSession", b =>
@@ -173,6 +212,16 @@ namespace CSharpRefactoringAssistant.Migrations
                     b.Navigation("Dialogue");
                 });
 
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.Dialogue", b =>
+                {
+                    b.HasOne("CSharpRefactoringAssistant.Models.DialogueGroup", "DialogueGroup")
+                        .WithMany("Dialogues")
+                        .HasForeignKey("DialogueGroupId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("DialogueGroup");
+                });
+
             modelBuilder.Entity("CSharpRefactoringAssistant.Models.ExecutionSession", b =>
                 {
                     b.HasOne("CSharpRefactoringAssistant.Models.Dialogue", "Dialogue")
@@ -202,6 +251,11 @@ namespace CSharpRefactoringAssistant.Migrations
                     b.Navigation("ExecutionSessions");
 
                     b.Navigation("Messages");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.DialogueGroup", b =>
+                {
+                    b.Navigation("Dialogues");
                 });
 #pragma warning restore 612, 618
         }

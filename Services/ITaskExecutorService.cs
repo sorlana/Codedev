@@ -17,6 +17,15 @@ public interface ITaskExecutorService
     Task<int> ExecuteTasksAsync(int dialogueId, string tasksFilePath, bool skipOptional = true);
     
     /// <summary>
+    /// Запускает выполнение конкретной задачи по номеру из файла tasks.md
+    /// </summary>
+    /// <param name="dialogueId">ID диалога</param>
+    /// <param name="tasksFilePath">Путь к файлу tasks.md</param>
+    /// <param name="taskNumber">Номер задачи для выполнения</param>
+    /// <returns>ID созданной сессии выполнения</returns>
+    Task<int> ExecuteSpecificTaskAsync(int dialogueId, string tasksFilePath, int taskNumber);
+    
+    /// <summary>
     /// Останавливает текущее выполнение задач
     /// </summary>
     /// <param name="dialogueId">ID диалога</param>

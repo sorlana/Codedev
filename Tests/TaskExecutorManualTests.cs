@@ -46,6 +46,7 @@ public class TaskExecutorManualTests
             // Создаем мок-сервисы
             var promptProcessor = new MockPromptProcessor();
             var gitService = new MockGitService();
+            var reasoningService = new MockReasoningService();
 
             var service = new TaskExecutorService(
                 context,
@@ -53,6 +54,7 @@ public class TaskExecutorManualTests
                 gitService,
                 logger,
                 pathValidator,
+                reasoningService,
                 loggerFactory
             );
 
@@ -91,6 +93,7 @@ public class TaskExecutorManualTests
 
             var promptProcessor = new MockPromptProcessor();
             var gitService = new MockGitService();
+            var reasoningService = new MockReasoningService();
 
             var service = new TaskExecutorService(
                 context,
@@ -98,6 +101,7 @@ public class TaskExecutorManualTests
                 gitService,
                 logger,
                 pathValidator,
+                reasoningService,
                 loggerFactory
             );
 
@@ -143,6 +147,7 @@ public class TaskExecutorManualTests
 
             var promptProcessor = new MockPromptProcessor();
             var gitService = new MockGitService();
+            var reasoningService = new MockReasoningService();
 
             var service = new TaskExecutorService(
                 context,
@@ -150,6 +155,7 @@ public class TaskExecutorManualTests
                 gitService,
                 logger,
                 pathValidator,
+                reasoningService,
                 loggerFactory
             );
 
@@ -249,6 +255,14 @@ public class TaskExecutorManualTests
         public Task<bool> HasUncommittedChangesAsync(string path)
         {
             return Task.FromResult(false);
+        }
+    }
+
+    private class MockReasoningService : IReasoningService
+    {
+        public Task<string> CreateTaskPlanAsync(string taskDescription, string projectPath)
+        {
+            return Task.FromResult($"Mock plan for: {taskDescription}");
         }
     }
 }

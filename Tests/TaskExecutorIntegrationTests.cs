@@ -261,6 +261,7 @@ public class TaskExecutorIntegrationTests
         
         var promptProcessor = new MockPromptProcessor();
         var gitService = new IntegrationTestMockGitService(dbContext);
+        var reasoningService = new MockReasoningService();
         var configuration = new ConfigurationBuilder().Build();
         var pathValidator = new PathValidator(configuration, pathValidatorLogger);
         
@@ -271,6 +272,7 @@ public class TaskExecutorIntegrationTests
             gitService,
             logger,
             pathValidator,
+            reasoningService,
             loggerFactory
         );
         
@@ -380,5 +382,16 @@ public class IntegrationTestMockGitService : IGitService
     public Task<bool> HasUncommittedChangesAsync(string path)
     {
         return Task.FromResult(false);
+    }
+}
+
+/// <summary>
+/// Mock реализация IReasoningService для тестирования
+/// </summary>
+public class MockReasoningService : IReasoningService
+{
+    public Task<string> CreateTaskPlanAsync(string taskDescription, string projectPath)
+    {
+        return Task.FromResult($"Mock plan for: {taskDescription}");
     }
 }

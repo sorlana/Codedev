@@ -15,6 +15,7 @@ public class RefactoringDbContext : DbContext
     public DbSet<Checkpoint> Checkpoints { get; set; }
     public DbSet<Project> Projects { get; set; }
     public DbSet<ExecutionSession> ExecutionSessions { get; set; }
+    public DbSet<DialogueGroup> DialogueGroups { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -40,6 +41,13 @@ public class RefactoringDbContext : DbContext
             .WithMany(d => d.ExecutionSessions)
             .HasForeignKey(e => e.DialogueId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        // Configure DialogueGroup relationship
+        modelBuilder.Entity<Dialogue>()
+            .HasOne(d => d.DialogueGroup)
+            .WithMany(g => g.Dialogues)
+            .HasForeignKey(d => d.DialogueGroupId)
+            .OnDelete(DeleteBehavior.SetNull); // При удалении группы диалоги остаются
 
         // Configure Project entity
         modelBuilder.Entity<Project>(entity =>

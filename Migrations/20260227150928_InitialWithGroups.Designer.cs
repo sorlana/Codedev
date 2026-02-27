@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CSharpRefactoringAssistant.Migrations
 {
     [DbContext(typeof(RefactoringDbContext))]
-    [Migration("20260226062424_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20260227150928_InitialWithGroups")]
+    partial class InitialWithGroups
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -56,13 +56,95 @@ namespace CSharpRefactoringAssistant.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("DialogueGroupId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ProjectPath")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DialogueGroupId");
+
                     b.ToTable("Dialogues");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.DialogueGroup", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Design")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsCollapsed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectPath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Requirements")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Tasks")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("DialogueGroups");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.ExecutionSession", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CurrentTask")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DialogueId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Progress")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("SkipOptional")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TasksFilePath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DialogueId");
+
+                    b.ToTable("ExecutionSessions");
                 });
 
             modelBuilder.Entity("CSharpRefactoringAssistant.Models.Message", b =>
@@ -133,6 +215,27 @@ namespace CSharpRefactoringAssistant.Migrations
                     b.Navigation("Dialogue");
                 });
 
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.Dialogue", b =>
+                {
+                    b.HasOne("CSharpRefactoringAssistant.Models.DialogueGroup", "DialogueGroup")
+                        .WithMany("Dialogues")
+                        .HasForeignKey("DialogueGroupId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("DialogueGroup");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.ExecutionSession", b =>
+                {
+                    b.HasOne("CSharpRefactoringAssistant.Models.Dialogue", "Dialogue")
+                        .WithMany("ExecutionSessions")
+                        .HasForeignKey("DialogueId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Dialogue");
+                });
+
             modelBuilder.Entity("CSharpRefactoringAssistant.Models.Message", b =>
                 {
                     b.HasOne("CSharpRefactoringAssistant.Models.Dialogue", "Dialogue")
@@ -148,7 +251,14 @@ namespace CSharpRefactoringAssistant.Migrations
                 {
                     b.Navigation("Checkpoints");
 
+                    b.Navigation("ExecutionSessions");
+
                     b.Navigation("Messages");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.DialogueGroup", b =>
+                {
+                    b.Navigation("Dialogues");
                 });
 #pragma warning restore 612, 618
         }

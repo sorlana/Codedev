@@ -56,6 +56,12 @@ public class OllamaSettings
     /// The model name to use (e.g., "llama2", "codellama")
     /// </summary>
     public string Model { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// The reasoning model name for task planning (e.g., "deepseek-r1:7b")
+    /// If not specified, uses the main Model for both planning and execution
+    /// </summary>
+    public string? ReasoningModel { get; set; }
 }
 
 /// <summary>

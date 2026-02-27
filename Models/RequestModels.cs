@@ -28,3 +28,16 @@ public class ExecutionStatusDto
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 }
+
+// DTO для работы с группами диалогов
+public record CreateDialogueGroupRequest(string Name, string ProjectPath);
+
+public record UpdateDialogueGroupContextRequest(
+    string? Requirements, 
+    string? Design, 
+    string? Tasks
+);
+
+public record UpdateDialogueGroupRequest(string Name, bool IsCollapsed);
+
+public record CreateDialogueInGroupRequest(int GroupId);

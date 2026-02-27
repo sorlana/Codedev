@@ -68,7 +68,8 @@ public class PromptProcessorIntegrationTests
         var pathValidatorLogger = loggerFactory.CreateLogger<PathValidator>();
         var pathValidator = new PathValidator(configuration, pathValidatorLogger);
         var tasksFilePathResolverLogger = loggerFactory.CreateLogger<TasksFilePathResolver>();
-        var commandRecognizer = new CommandRecognizer();
+        var commandRecognizerLogger = loggerFactory.CreateLogger<CommandRecognizer>();
+        var commandRecognizer = new CommandRecognizer(commandRecognizerLogger);
         var tasksFilePathResolver = new TasksFilePathResolver(pathValidator, tasksFilePathResolverLogger);
         var mockProjectService = new MockProjectManagementService();
 
@@ -218,7 +219,8 @@ public class PromptProcessorIntegrationTests
         var pathValidatorLogger1 = loggerFactory.CreateLogger<PathValidator>();
         var pathValidator1 = new PathValidator(openAiConfig, pathValidatorLogger1);
         var tasksFilePathResolverLogger1 = loggerFactory.CreateLogger<TasksFilePathResolver>();
-        var commandRecognizer1 = new CommandRecognizer();
+        var commandRecognizerLogger1 = loggerFactory.CreateLogger<CommandRecognizer>();
+        var commandRecognizer1 = new CommandRecognizer(commandRecognizerLogger1);
         var tasksFilePathResolver1 = new TasksFilePathResolver(pathValidator1, tasksFilePathResolverLogger1);
         var mockProjectService1 = new MockProjectManagementService();
         
@@ -264,7 +266,8 @@ public class PromptProcessorIntegrationTests
         var pathValidatorLogger2 = loggerFactory.CreateLogger<PathValidator>();
         var pathValidator2 = new PathValidator(ollamaConfig, pathValidatorLogger2);
         var tasksFilePathResolverLogger2 = loggerFactory.CreateLogger<TasksFilePathResolver>();
-        var commandRecognizer2 = new CommandRecognizer();
+        var commandRecognizerLogger2 = loggerFactory.CreateLogger<CommandRecognizer>();
+        var commandRecognizer2 = new CommandRecognizer(commandRecognizerLogger2);
         var tasksFilePathResolver2 = new TasksFilePathResolver(pathValidator2, tasksFilePathResolverLogger2);
         var mockProjectService2 = new MockProjectManagementService();
         
@@ -478,6 +481,11 @@ public class MockDirectShellService : IDirectShellService
 public class MockTaskExecutorService : ITaskExecutorService
 {
     public Task<int> ExecuteTasksAsync(int dialogueId, string tasksFilePath, bool skipOptional = true)
+    {
+        return Task.FromResult(1); // Возвращаем mock ID сессии
+    }
+
+    public Task<int> ExecuteSpecificTaskAsync(int dialogueId, string tasksFilePath, int taskNumber)
     {
         return Task.FromResult(1); // Возвращаем mock ID сессии
     }

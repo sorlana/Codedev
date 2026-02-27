@@ -124,6 +124,7 @@ builder.Services.AddScoped<Lazy<ITaskExecutorService>>(sp =>
 // Регистрация компонентов для агентского режима
 builder.Services.AddSingleton<CommandRecognizer>();
 builder.Services.AddScoped<TasksFilePathResolver>();
+builder.Services.AddScoped<IReasoningService, ReasoningService>();
 
 // Регистрация WebSocket компонентов
 builder.Services.AddSingleton<IWebSocketManager, CSharpRefactoringAssistant.Services.WebSocketManager>();
@@ -311,6 +312,115 @@ app.MapDelete("/api/messages/{messageId}", async (
         messageId, message.DialogueId);
 
     return Results.Ok(new { message = "Message deleted successfully" });
+});
+
+// DialogueGroup endpoints
+app.MapGet("/api/dialogue-groups", async (
+    RefactoringDbContext dbContext,
+    IProjectManagementService projectService) =>
+{
+    var selectedProject = await projectService.GetSelectedProjectAsync();
+    
+    if (selectedProject == null)
+    {
+        return Results.Ok(new List<DialogueGroup>());
+    }
+    
+    var groups = await dbContext.DialogueGroups
+        .Include(g => g.Dialogues)
+        .Where(g => g.ProjectPath == selectedProject.Path)
+        .OrderByDescending(g => g.CreatedAt)
+        .ToListAsync();
+    
+    return Results.Ok(groups);
+});
+
+app.MapPost("/api/dialogue-groups", async (
+    CreateDialogueGroupRequest request,
+    RefactoringDbContext dbContext) =>
+{
+    var group = new DialogueGroup
+    {
+        Name = request.Name,
+        ProjectPath = request.ProjectPath,
+        CreatedAt = DateTime.UtcNow
+    };
+    
+    dbContext.DialogueGroups.Add(group);
+    await dbContext.SaveChangesAsync();
+    
+    return Results.Ok(group);
+});
+
+app.MapPut("/api/dialogue-groups/{id}", async (
+    int id,
+    UpdateDialogueGroupRequest request,
+    RefactoringDbContext dbContext) =>
+{
+    var group = await dbContext.DialogueGroups.FindAsync(id);
+    if (group == null)
+        return Results.NotFound();
+    
+    group.Name = request.Name;
+    group.IsCollapsed = request.IsCollapsed;
+    
+    await dbContext.SaveChangesAsync();
+    return Results.Ok(group);
+});
+
+app.MapPut("/api/dialogue-groups/{id}/context", async (
+    int id,
+    UpdateDialogueGroupContextRequest request,
+    RefactoringDbContext dbContext) =>
+{
+    var group = await dbContext.DialogueGroups.FindAsync(id);
+    if (group == null)
+        return Results.NotFound();
+    
+    group.Requirements = request.Requirements;
+    group.Design = request.Design;
+    group.Tasks = request.Tasks;
+    
+    await dbContext.SaveChangesAsync();
+    return Results.Ok(group);
+});
+
+app.MapDelete("/api/dialogue-groups/{id}", async (
+    int id,
+    RefactoringDbContext dbContext) =>
+{
+    var group = await dbContext.DialogueGroups
+        .Include(g => g.Dialogues)
+        .FirstOrDefaultAsync(g => g.Id == id);
+    
+    if (group == null)
+        return Results.NotFound();
+    
+    dbContext.DialogueGroups.Remove(group);
+    await dbContext.SaveChangesAsync();
+    
+    return Results.Ok(new { message = "Group deleted successfully" });
+});
+
+app.MapPost("/api/dialogue-groups/{groupId}/dialogues", async (
+    int groupId,
+    RefactoringDbContext dbContext) =>
+{
+    var group = await dbContext.DialogueGroups.FindAsync(groupId);
+    if (group == null)
+        return Results.NotFound("Group not found");
+    
+    var dialogue = new Dialogue
+    {
+        ProjectPath = group.ProjectPath,
+        DialogueGroupId = groupId,
+        CreatedAt = DateTime.UtcNow
+    };
+    
+    dbContext.Dialogues.Add(dialogue);
+    await dbContext.SaveChangesAsync();
+    
+    return Results.Ok(dialogue);
 });
 
 // Checkpoint endpoints
@@ -779,6 +889,137 @@ app.MapGet("/api/startup/validate", async (IStartupValidationService validationS
     return Results.Ok(result);
 });
 
+// Reasoning model validation endpoint
+app.MapGet("/api/startup/validate-reasoning", async (IConfigurationService configService, IHttpClientFactory httpClientFactory) =>
+{
+    try
+    {
+        app.Logger.LogInformation("[ValidateReasoning] Начало проверки reasoning модели");
+        
+        var config = await configService.GetConfigurationAsync();
+        
+        app.Logger.LogInformation("[ValidateReasoning] Provider: {Provider}, ReasoningModel: {Model}", 
+            config.Provider, config.Ollama?.ReasoningModel ?? "null");
+        
+        // Проверяем, настроена ли reasoning модель
+        if (config.Provider != "Ollama" || string.IsNullOrEmpty(config.Ollama?.ReasoningModel))
+        {
+            app.Logger.LogWarning("[ValidateReasoning] Reasoning модель не настроена");
+            return Results.Ok(new
+            {
+                isConnected = false,
+                errorMessage = "Reasoning модель не настроена",
+                modelName = (string?)null
+            });
+        }
+        
+        // Проверяем доступность reasoning модели через Ollama API
+        var httpClient = httpClientFactory.CreateClient();
+        httpClient.Timeout = TimeSpan.FromSeconds(5);
+        
+        var baseUrl = config.Ollama.BaseUrl;
+        var model = config.Ollama.ReasoningModel;
+        
+        app.Logger.LogInformation("[ValidateReasoning] Проверка модели {Model} в Ollama {BaseUrl}", model, baseUrl);
+        
+        // Проверяем, что модель существует в списке доступных моделей
+        var response = await httpClient.GetAsync($"{baseUrl}/api/tags");
+        
+        if (!response.IsSuccessStatusCode)
+        {
+            app.Logger.LogWarning("[ValidateReasoning] Не удалось подключиться к Ollama: {Status}", response.StatusCode);
+            return Results.Ok(new
+            {
+                isConnected = false,
+                errorMessage = $"Не удалось подключиться к Ollama: {response.StatusCode}",
+                modelName = model
+            });
+        }
+        
+        var responseJson = await response.Content.ReadAsStringAsync();
+        var responseData = JsonSerializer.Deserialize<JsonElement>(responseJson);
+        
+        var modelExists = false;
+        var availableModels = new List<string>();
+        
+        if (responseData.TryGetProperty("models", out var modelsArray))
+        {
+            foreach (var modelItem in modelsArray.EnumerateArray())
+            {
+                if (modelItem.TryGetProperty("name", out var nameProperty))
+                {
+                    var modelName = nameProperty.GetString();
+                    if (modelName != null)
+                    {
+                        availableModels.Add(modelName);
+                        
+                        // Проверяем точное совпадение или совпадение без тега версии
+                        if (modelName.Equals(model, StringComparison.OrdinalIgnoreCase) ||
+                            modelName.StartsWith(model.Split(':')[0], StringComparison.OrdinalIgnoreCase))
+                        {
+                            modelExists = true;
+                        }
+                    }
+                }
+            }
+        }
+        
+        app.Logger.LogInformation("[ValidateReasoning] Доступные модели в Ollama: {Models}", string.Join(", ", availableModels));
+        app.Logger.LogInformation("[ValidateReasoning] Модель {Model} найдена: {Found}", model, modelExists);
+        
+        if (!modelExists)
+        {
+            return Results.Ok(new
+            {
+                isConnected = false,
+                errorMessage = $"Модель {model} не найдена в Ollama. Доступные: {string.Join(", ", availableModels.Take(5))}",
+                modelName = model
+            });
+        }
+        
+        return Results.Ok(new
+        {
+            isConnected = true,
+            errorMessage = (string?)null,
+            modelName = model
+        });
+    }
+    catch (HttpRequestException ex)
+    {
+        app.Logger.LogWarning(ex, "[ValidateReasoning] Не удалось подключиться к Ollama");
+        return Results.Ok(new
+        {
+            isConnected = false,
+            errorMessage = "Не удалось подключиться к Ollama",
+            modelName = (string?)null
+        });
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "[ValidateReasoning] Ошибка при проверке reasoning модели");
+        return Results.Ok(new
+        {
+            isConnected = false,
+            errorMessage = $"Ошибка: {ex.Message}",
+            modelName = (string?)null
+        });
+    }
+});
+
+// DEBUG: Диагностический endpoint для проверки конфигурации
+app.MapGet("/api/debug/config", async (IConfigurationService configService) =>
+{
+    var config = await configService.GetConfigurationAsync();
+    return Results.Ok(new
+    {
+        provider = config.Provider,
+        ollamaBaseUrl = config.Ollama?.BaseUrl,
+        ollamaModel = config.Ollama?.Model,
+        ollamaReasoningModel = config.Ollama?.ReasoningModel,
+        hasOllama = config.Ollama != null
+    });
+});
+
 // Task execution endpoints
 app.MapPost("/api/dialogues/{id}/execute-tasks", async (
     int id,
@@ -1131,6 +1372,97 @@ app.MapPost("/api/ollama/start", async (IConfiguration configuration) =>
     {
         app.Logger.LogError(ex, "Error starting Ollama model");
         return Results.Problem($"Ошибка запуска модели: {ex.Message}");
+    }
+});
+
+// Ollama reasoning model management endpoint
+app.MapPost("/api/ollama/start-reasoning", async (IConfiguration configuration, IConfigurationService configService) =>
+{
+    try
+    {
+        app.Logger.LogInformation("Starting reasoning model endpoint called");
+        
+        // Получаем текущую конфигурацию
+        var config = await configService.GetConfigurationAsync();
+        app.Logger.LogInformation("Current provider: {Provider}", config.Provider);
+        
+        // Проверяем, что используется Ollama
+        if (config.Provider != "Ollama")
+        {
+            app.Logger.LogWarning("Provider is not Ollama: {Provider}", config.Provider);
+            return Results.BadRequest(new { message = "Reasoning модель доступна только для провайдера Ollama" });
+        }
+        
+        // Если ReasoningModel не настроена, устанавливаем значение по умолчанию
+        if (string.IsNullOrEmpty(config.Ollama?.ReasoningModel))
+        {
+            app.Logger.LogInformation("ReasoningModel не настроена, устанавливаем значение по умолчанию: deepseek-r1:7b");
+            
+            if (config.Ollama == null)
+            {
+                config.Ollama = new OllamaSettings
+                {
+                    BaseUrl = "http://localhost:11434",
+                    Model = "llama3.1:8b"
+                };
+            }
+            
+            config.Ollama.ReasoningModel = "deepseek-r1:7b";
+            
+            try
+            {
+                // Сохраняем обновленную конфигурацию
+                await configService.SaveConfigurationAsync(config);
+                app.Logger.LogInformation("Configuration saved successfully");
+            }
+            catch (Exception ex)
+            {
+                app.Logger.LogError(ex, "Failed to save configuration");
+                return Results.Problem($"Не удалось сохранить конфигурацию: {ex.Message}");
+            }
+        }
+        
+        var model = config.Ollama.ReasoningModel;
+        
+        app.Logger.LogInformation("Attempting to start Ollama reasoning model: {Model}", model);
+        
+        try
+        {
+            // Запускаем команду ollama run в фоновом режиме
+            var processStartInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c start /min ollama run {model}",
+                UseShellExecute = true,
+                CreateNoWindow = false,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Minimized
+            };
+            
+            var process = System.Diagnostics.Process.Start(processStartInfo);
+            
+            if (process == null)
+            {
+                app.Logger.LogError("Failed to start process");
+                return Results.Problem("Не удалось запустить процесс Ollama");
+            }
+            
+            app.Logger.LogInformation("Ollama reasoning model start command executed successfully");
+            
+            // Даем модели время на запуск
+            await Task.Delay(3000);
+            
+            return Results.Ok(new { message = $"Reasoning модель {model} запускается..." });
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Failed to start Ollama process");
+            return Results.Problem($"Не удалось запустить Ollama: {ex.Message}");
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Error starting Ollama reasoning model");
+        return Results.Problem($"Ошибка запуска reasoning модели: {ex.Message}");
     }
 });
 

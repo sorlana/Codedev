@@ -101,6 +101,137 @@ public class StreamingService : IStreamingService
             dbContext.Messages.Add(userMessage);
             await dbContext.SaveChangesAsync(cts.Token);
             
+            // ПРОВЕРКА НА КОМАНДУ АГЕНТСКОГО РЕЖИМА
+            var commandRecognizer = scope.ServiceProvider.GetRequiredService<CommandRecognizer>();
+            var tasksFilePathResolver = scope.ServiceProvider.GetRequiredService<TasksFilePathResolver>();
+            
+            _logger.LogInformation("=== STREAMING: ПРОВЕРКА КОМАНДЫ АГЕНТСКОГО РЕЖИМА ===");
+            _logger.LogInformation("Промпт: '{Prompt}'", prompt);
+            
+            if (commandRecognizer.TryRecognizeCommand(prompt, out var commandType, out var filePath, out var taskNumber))
+            {
+                _logger.LogInformation("Распознана команда агентского режима: {CommandType}, FilePath: {FilePath}, TaskNumber: {TaskNumber}",
+                    commandType, filePath ?? "(null)", taskNumber?.ToString() ?? "(null)");
+                
+                // Получаем TaskExecutorService
+                ITaskExecutorService taskExecutor;
+                try
+                {
+                    taskExecutor = scope.ServiceProvider.GetRequiredService<ITaskExecutorService>();
+                    _logger.LogInformation("TaskExecutorService успешно получен из DI");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Ошибка при получении TaskExecutorService из DI");
+                    throw new InvalidOperationException("Не удалось получить TaskExecutorService", ex);
+                }
+                
+                // Выполняем команду агентского режима
+                string commandResult;
+                try
+                {
+                    switch (commandType)
+                    {
+                        case AgentCommandType.StartExecution:
+                            _logger.LogInformation("Начало обработки команды StartExecution");
+                            var resolvedPath = await tasksFilePathResolver.ResolveTasksFilePathAsync(filePath, projectPath);
+                            _logger.LogInformation("Путь разрешен: {ResolvedPath}", resolvedPath);
+                            
+                            if (taskNumber.HasValue)
+                            {
+                                _logger.LogInformation("Вызов ExecuteSpecificTaskAsync: dialogueId={DialogueId}, path={Path}, taskNumber={TaskNumber}", 
+                                    dialogueId, resolvedPath, taskNumber.Value);
+                                    
+                                var sessionId = await taskExecutor.ExecuteSpecificTaskAsync(dialogueId, resolvedPath, taskNumber.Value);
+                                
+                                _logger.LogInformation("ExecuteSpecificTaskAsync завершен, sessionId={SessionId}", sessionId);
+                                commandResult = $"✅ Запущено выполнение задачи {taskNumber.Value} из файла {Path.GetFileName(resolvedPath)}\n\nСледите за прогрессом в сообщениях ниже.";
+                            }
+                            else
+                            {
+                                _logger.LogInformation("Вызов ExecuteTasksAsync: dialogueId={DialogueId}, path={Path}", 
+                                    dialogueId, resolvedPath);
+                                    
+                                var sessionId = await taskExecutor.ExecuteTasksAsync(dialogueId, resolvedPath);
+                                
+                                _logger.LogInformation("ExecuteTasksAsync завершен, sessionId={SessionId}", sessionId);
+                                commandResult = $"✅ Запущено выполнение всех задач из файла {Path.GetFileName(resolvedPath)}\n\nСледите за прогрессом в сообщениях ниже.";
+                            }
+                            break;
+                            
+                        case AgentCommandType.StopExecution:
+                            await taskExecutor.StopExecutionAsync(dialogueId);
+                            commandResult = "⏸️ Выполнение задач остановлено.";
+                            break;
+                            
+                        case AgentCommandType.ResumeExecution:
+                            await taskExecutor.ResumeExecutionAsync(dialogueId);
+                            commandResult = "▶️ Продолжаю выполнение задач...";
+                            break;
+                            
+                        case AgentCommandType.ShowStatus:
+                            var status = await taskExecutor.GetExecutionStatusAsync(dialogueId);
+                            commandResult = $"Статус: {status.Status}";
+                            break;
+                            
+                        default:
+                            commandResult = $"❌ Неизвестная команда: {commandType}";
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Ошибка при выполнении команды агентского режима");
+                    commandResult = $"❌ Ошибка: {ex.Message}";
+                }
+                
+                // Отправляем результат через WebSocket
+                fullResponse.Append(commandResult);
+                
+                await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                {
+                    Type = WebSocketMessageTypes.AssistantMessageChunk,
+                    Payload = new MessageChunkPayload
+                    {
+                        DialogueId = dialogueId,
+                        MessageId = null,
+                        Content = commandResult,
+                        IsComplete = false
+                    }
+                });
+                
+                // Сохраняем ответ ассистента
+                var commandResponseMessage = new Message
+                {
+                    DialogueId = dialogueId,
+                    Role = "assistant",
+                    Content = commandResult,
+                    Timestamp = DateTime.UtcNow
+                };
+                dbContext.Messages.Add(commandResponseMessage);
+                await dbContext.SaveChangesAsync(cts.Token);
+                
+                messageId = commandResponseMessage.Id;
+                
+                // Отправляем финальное сообщение
+                await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                {
+                    Type = WebSocketMessageTypes.AssistantMessageEnd,
+                    Payload = new MessageChunkPayload
+                    {
+                        DialogueId = dialogueId,
+                        MessageId = messageId,
+                        Content = commandResult,
+                        IsComplete = true
+                    }
+                });
+                
+                _logger.LogInformation("Команда агентского режима выполнена успешно");
+                return commandResult;
+            }
+            
+            _logger.LogInformation("Команда агентского режима не распознана, продолжаем обычную обработку");
+            
             // Отправляем уведомление о начале генерации
             await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
             {

@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>C# Refactoring Assistant</title>
+    <!-- Material Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -17,6 +19,22 @@
             height: 100vh;
             display: flex;
             overflow: hidden;
+        }
+
+        /* Material Icons */
+        .material-icons {
+            font-family: 'Material Icons';
+            font-weight: normal;
+            font-style: normal;
+            font-size: 20px;
+            display: inline-block;
+            line-height: 1;
+            text-transform: none;
+            letter-spacing: normal;
+            word-wrap: normal;
+            white-space: nowrap;
+            direction: ltr;
+            vertical-align: middle;
         }
 
         /* Startup Warning Styles */
@@ -117,19 +135,6 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-        }
-
-        .help-button {
-            background: transparent;
-            border: none;
-            color: #007bff;
-            cursor: pointer;
-            font-size: 20px;
-            padding: 4px;
-        }
-
-        .help-button:hover {
-            color: #0056b3;
         }
 
         #new-dialogue-form {
@@ -337,8 +342,206 @@
             background: #0056b3;
         }
 
-        #create-dialogue-button {
+        #create-dialogue-group-button {
             width: 100%;
+        }
+
+        #dialogue-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        /* Стили для групп диалогов (аккордеон) */
+        .dialogue-group {
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+        }
+
+        .dialogue-group-header {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #ddd;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .dialogue-group-header:hover {
+            background: #e9ecef;
+        }
+
+        .group-toggle-icon {
+            margin-right: 10px;
+            font-size: 12px;
+            transition: transform 0.2s;
+        }
+
+        .dialogue-group.collapsed .group-toggle-icon {
+            transform: rotate(-90deg);
+        }
+
+        .group-name {
+            flex: 1;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .group-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .group-action-btn {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .group-action-btn:hover {
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        .group-action-btn.add:hover {
+            background: rgba(40, 167, 69, 0.1);
+            color: #28a745;
+        }
+
+        .group-action-btn.context:hover {
+            background: rgba(0, 123, 255, 0.1);
+            color: #007bff;
+        }
+
+        .group-action-btn.rename:hover {
+            background: rgba(255, 193, 7, 0.1);
+            color: #ffc107;
+        }
+
+        .group-action-btn.delete:hover {
+            background: rgba(220, 53, 69, 0.1);
+            color: #dc3545;
+        }
+
+        .dialogue-group-content {
+            display: block;
+        }
+
+        .dialogue-group.collapsed .dialogue-group-content {
+            display: none;
+        }
+
+        .ungrouped-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid #ddd;
+        }
+
+        .ungrouped-header {
+            padding: 10px 15px;
+            font-weight: 600;
+            color: #666;
+            font-size: 14px;
+        }
+
+        /* Модальное окно контекста группы */
+        #context-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #context-modal-overlay.active {
+            display: flex;
+        }
+
+        #context-modal {
+            background: white;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .context-modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .context-field {
+            margin-bottom: 20px;
+        }
+
+        .context-field label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .context-field textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            resize: vertical;
+        }
+
+        .context-field textarea:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+
+        .context-modal-footer {
+            padding: 15px 20px;
+            border-top: 1px solid #ddd;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .context-modal-footer button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .context-modal-footer .btn-save {
+            background: #007bff;
+            color: white;
+        }
+
+        .context-modal-footer .btn-save:hover {
+            background: #0056b3;
+        }
+
+        .context-modal-footer .btn-cancel {
+            background: #6c757d;
+            color: white;
+        }
+
+        .context-modal-footer .btn-cancel:hover {
+            background: #5a6268;
         }
 
         #dialogue-list {
@@ -422,7 +625,6 @@
             padding: 10px 16px;
             background: white;
             border-radius: 8px;
-            margin-bottom: 12px;
             font-size: 14px;
             font-weight: 500;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -431,6 +633,7 @@
         .status-icon {
             font-size: 16px;
             line-height: 1;
+            cursor: help; /* Курсор подсказки при наведении */
         }
 
         .status-label {
@@ -466,41 +669,48 @@
         }
 
         /* Стили для индикатора статуса модели */
-        #model-status-indicator {
+        #model-status-indicator,
+        #reasoning-model-status-indicator {
             display: flex;
             align-items: center;
             gap: 8px;
             padding: 10px 16px;
             background: white;
             border-radius: 8px;
-            margin-bottom: 12px;
             font-size: 14px;
             font-weight: 500;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         }
 
-        .model-status-icon {
+        .model-status-icon,
+        .reasoning-model-status-icon {
             font-size: 16px;
             line-height: 1;
+            cursor: help; /* Курсор подсказки при наведении */
         }
 
-        .model-status-label {
+        .model-status-label,
+        .reasoning-model-status-label {
             color: #333;
         }
 
-        #model-status-indicator.model-active .model-status-icon {
+        #model-status-indicator.model-active .model-status-icon,
+        #reasoning-model-status-indicator.model-active .reasoning-model-status-icon {
             color: #28a745; /* Зеленый - модель активна */
         }
 
-        #model-status-indicator.model-inactive .model-status-icon {
+        #model-status-indicator.model-inactive .model-status-icon,
+        #reasoning-model-status-indicator.model-inactive .reasoning-model-status-icon {
             color: #dc3545; /* Красный - модель неактивна */
         }
 
-        #start-model-button:hover {
+        #start-model-button:hover,
+        #start-reasoning-model-button:hover {
             background: #0056b3;
         }
 
-        #start-model-button:disabled {
+        #start-model-button:disabled,
+        #start-reasoning-model-button:disabled {
             background: #6c757d;
             cursor: not-allowed;
         }
@@ -990,20 +1200,21 @@
     <div id="app">
         <div id="sidebar">
             <div id="sidebar-header">
-                <h1>
-                    Диалоги
-                    <button class="help-button" onclick="showHelp()" title="Помощь">❓</button>
-                </h1>
+                <h1>Диалоги</h1>
                 <div id="new-dialogue-form">
                     <div class="project-selector-container">
-                        <select id="project-selector" onchange="selectProject(this.value)">
-                            <option value="">Выберите проект</option>
-                        </select>
+                        <input 
+                            id="selected-project-display" 
+                            type="text" 
+                            readonly 
+                            placeholder="Проект не выбран" 
+                            style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa; cursor: default;"
+                        />
                         <button id="open-project-modal-btn" onclick="openProjectModal()" title="Управление проектами">
-                            📁
+                            <span class="material-icons">folder</span>
                         </button>
                     </div>
-                    <button id="create-dialogue-button">Создать диалог</button>
+                    <button id="create-dialogue-group-button">Добавить группу диалогов</button>
                 </div>
             </div>
             <div id="dialogue-list"></div>
@@ -1011,17 +1222,28 @@
 
         <div id="main-content">
             <div id="dialogue-view">
-                <!-- Индикатор статуса соединения -->
-                <div id="connection-status-indicator">
-                    <span class="status-icon">●</span>
-                    <span class="status-label">Отключено</span>
-                </div>
-                
-                <!-- Индикатор статуса модели -->
-                <div id="model-status-indicator" class="model-inactive" style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
-                    <span class="model-status-icon">●</span>
-                    <span class="model-status-label">Проверка модели...</span>
-                    <button id="start-model-button" style="display: none; padding: 4px 12px; font-size: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 8px;">🚀 Запустить</button>
+                <!-- Контейнер для индикаторов статуса -->
+                <div style="display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
+                    <!-- Индикатор статуса соединения -->
+                    <div id="connection-status-indicator">
+                        <span class="status-icon" title="Отключено">●</span>
+                        <span class="status-label">WebSocket</span>
+                        <button id="reconnect-websocket-button" style="display: none; padding: 4px 12px; font-size: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 8px;">🔄 Переподключить</button>
+                    </div>
+                    
+                    <!-- Индикатор статуса модели -->
+                    <div id="model-status-indicator" class="model-inactive">
+                        <span class="model-status-icon" title="Проверка модели...">●</span>
+                        <span class="model-status-label">Модель</span>
+                        <button id="start-model-button" style="display: none; padding: 4px 12px; font-size: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 8px;">🚀 Запустить</button>
+                    </div>
+                    
+                    <!-- Индикатор статуса reasoning модели -->
+                    <div id="reasoning-model-status-indicator" class="model-inactive">
+                        <span class="reasoning-model-status-icon" title="Проверка reasoning модели...">●</span>
+                        <span class="reasoning-model-status-label">Reasoning модель</span>
+                        <button id="start-reasoning-model-button" onclick="startReasoningModel()" style="display: none; padding: 4px 12px; font-size: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 8px;">🚀 Запустить</button>
+                    </div>
                 </div>
                 
                 <!-- Поле поиска по сообщениям -->
@@ -1053,7 +1275,7 @@
                     <!-- Кнопка остановки генерации (для streaming) -->
                     <div id="streaming-controls" style="display: none; margin-bottom: 12px;">
                         <button id="cancel-generation-btn" class="cancel-generation-btn">
-                            ⏹️ Остановить генерацию
+                            <span class="material-icons">stop</span> Остановить генерацию
                         </button>
                     </div>
                     
@@ -1069,7 +1291,7 @@
             <div class="checkpoint-header">
                 <h2>Чекпоинты</h2>
                 <button id="create-checkpoint-btn" onclick="createManualCheckpoint()" title="Добавить чекпойнт">
-                    ➕
+                    <span class="material-icons">add</span>
                 </button>
             </div>
             <div id="checkpoint-list"></div>
@@ -1085,7 +1307,38 @@
             </div>
             <div class="modal-body">
                 <div id="modal-project-list"></div>
-                <button id="add-project-btn" class="btn-primary" onclick="addProject()">Добавить</button>
+                <div style="display: flex; gap: 8px; margin-top: 16px;">
+                    <button id="select-project-btn" class="btn-primary" onclick="selectProjectFromModal()">Выбрать</button>
+                    <button id="add-project-btn" class="btn-primary" onclick="addProject()">Добавить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Modal -->
+    <div id="context-modal-overlay" class="modal-overlay">
+        <div id="context-modal" class="modal">
+            <div class="modal-header">
+                <h2>Контекст группы</h2>
+                <button class="close-modal" onclick="closeContextModal()"><span class="material-icons">close</span></button>
+            </div>
+            <div class="context-modal-body">
+                <div class="context-field">
+                    <label for="context-requirements">Требования (requirements.md)</label>
+                    <textarea id="context-requirements" placeholder="Вставьте содержимое файла requirements.md..."></textarea>
+                </div>
+                <div class="context-field">
+                    <label for="context-design">Проектирование (design.md)</label>
+                    <textarea id="context-design" placeholder="Вставьте содержимое файла design.md..."></textarea>
+                </div>
+                <div class="context-field">
+                    <label for="context-tasks">Задачи (tasks.md)</label>
+                    <textarea id="context-tasks" placeholder="Вставьте содержимое файла tasks.md..."></textarea>
+                </div>
+            </div>
+            <div class="context-modal-footer">
+                <button class="btn-cancel" onclick="closeContextModal()">Отмена</button>
+                <button class="btn-save" onclick="saveGroupContext()">Сохранить</button>
             </div>
         </div>
     </div>
