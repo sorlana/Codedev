@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Интеграционное тестирование - Real-time Chat Optimization</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #4ec9b0;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #858585;
+            margin-bottom: 30px;
+        }
+        
+        .test-section {
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .test-section h2 {
+            color: #569cd6;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .test-group {
+            margin-bottom: 20px;
+        }
+        
+        .test-group h3 {
+            color: #dcdcaa;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+        
+        .test-item {
+            background: #1e1e1e;
+            border-left: 3px solid #3e3e42;
+            padding: 12px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .test-item.passed {
+            border-left-color: #4ec9b0;
+        }
+        
+        .test-item.failed {
+            border-left-color: #f48771;
+        }
+        
+        .test-item.running {
+            border-left-color: #dcdcaa;
+        }
+        
+        .test-name {
+            flex: 1;
+        }
+        
+        .test-status {
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        
+        .test-status.pending {
+            background: #3e3e42;
+            color: #858585;
+        }
+        
+        .test-status.running {
+            background: #dcdcaa;
+            color: #1e1e1e;
+        }
+        
+        .test-status.passed {
+            background: #4ec9b0;
+            color: #1e1e1e;
+        }
+        
+        .test-status.failed {
+            background: #f48771;
+            color: #1e1e1e;
+        }
+        
+        .test-details {
+            font-size: 12px;
+            color: #858585;
+            margin-top: 5px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        button:hover {
+            background: #1177bb;
+        }
+        
+        button:disabled {
+            background: #3e3e42;
+            color: #858585;
+            cursor: not-allowed;
+        }
+        
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .metric-card {
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        
+        .metric-label {
+            color: #858585;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        
+        .metric-value {
+            color: #4ec9b0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        .metric-value.warning {
+            color: #dcdcaa;
+        }
+        
+        .metric-value.error {
+            color: #f48771;
+        }
+        
+        .summary {
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        
+        .summary h2 {
+            color: #569cd6;
+            margin-bottom: 15px;
+        }
+        
+        .summary-stats {
+            display: flex;
+            gap: 30px;
+            font-size: 18px;
+        }
+        
+        .summary-stat {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .summary-stat .label {
+            color: #858585;
+        }
+        
+        .summary-stat .value {
+            font-weight: 600;
+        }
+        
+        .summary-stat .value.passed {
+            color: #4ec9b0;
+        }
+        
+        .summary-stat .value.failed {
+            color: #f48771;
+        }
+        
+        .log-container {
+            background: #1e1e1e;
+            border: 1px solid #3e3e42;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 2px 0;
+        }
+        
+        .log-entry.info {
+            color: #4ec9b0;
+        }
+        
+        .log-entry.warning {
+            color: #dcdcaa;
+        }
+        
+        .log-entry.error {
+            color: #f48771;
+        }
+        
+        .log-timestamp {
+            color: #858585;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Интеграционное тестирование</h1>
+        <p class="subtitle">Real-time Chat Optimization - Финальное тестирование всех функций</p>
+        
+        <div class="controls">
+            <button id="runAllTests">▶ Запустить все тесты</button>
+            <button id="runWebSocketTests">WebSocket тесты</button>
+            <button id="runCacheTests">Кэш тесты</button>
+            <button id="runVirtualizationTests">Виртуализация тесты</button>
+            <button id="runDraftTests">Черновики тесты</button>
+            <button id="clearResults">🗑 Очистить результаты</button>
+        </div>
+        
+        <div class="metrics">
+            <div class="metric-card">
+                <div class="metric-label">Статус соединения</div>
+                <div class="metric-value" id="connectionStatus">Отключено</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">TTFB (ms)</div>
+                <div class="metric-value" id="ttfbMetric">-</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">FPS прокрутки</div>
+                <div class="metric-value" id="fpsMetric">-</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Размер кэша</div>
+                <div class="metric-value" id="cacheSizeMetric">0 KB</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Сообщений в кэше</div>
+                <div class="metric-value" id="cacheMessagesMetric">0</div>
+            </div>
+        </div>
+        
+        <!-- WebSocket тесты -->
+        <div class="test-section">
+            <h2>1. WebSocket соединение и real-time обновления</h2>
+            
+            <div class="test-group">
+                <h3>Базовое подключение</h3>
+                <div class="test-item" data-test="ws-connect">
+                    <div class="test-name">
+                        Установка WebSocket соединения
+                        <div class="test-details">Требование 1.1</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="ws-reconnect">
+                    <div class="test-name">
+                        Автоматическое переподключение с экспоненциальной задержкой
+                        <div class="test-details">Требование 1.2, Свойство 1</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="ws-fallback">
+                    <div class="test-name">
+                        Fallback на HTTP после 5 неудачных попыток
+                        <div class="test-details">Требование 1.3, Свойство 27</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+            </div>
+            
+            <div class="test-group">
+                <h3>Передача сообщений</h3>
+                <div class="test-item" data-test="ws-send-message">
+                    <div class="test-name">
+                        Отправка сообщения через WebSocket
+                        <div class="test-details">Требование 1.4, Свойство 2</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="ws-receive-message">
+                    <div class="test-name">
+                        Получение и отображение сообщения за < 100ms
+                        <div class="test-details">Требование 1.5, Свойство 3</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="ws-sync-messages">
+                    <div class="test-name">
+                        Синхронизация пропущенных сообщений после переподключения
+                        <div class="test-details">Требование 1.6, Свойство 4</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Streaming тесты -->
+        <div class="test-section">
+            <h2>2. Потоковая передача ответа (Streaming)</h2>
+            
+            <div class="test-group">
+                <h3>Базовый streaming</h3>
+                <div class="test-item" data-test="stream-start">
+                    <div class="test-name">
+                        Создание пустого сообщения при начале генерации
+                        <div class="test-details">Требование 2.1, Свойство 5</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="stream-chunks">
+                    <div class="test-name">
+                        Добавление фрагментов за < 50ms
+                        <div class="test-details">Требование 2.2, Свойство 3</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="stream-complete">
+                    <div class="test-name">
+                        Сохранение завершенного ответа в БД
+                        <div class="test-details">Требование 2.4, Свойство 7</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+            </div>
+            
+            <div class="test-group">
+                <h3>Управление и ошибки</h3>
+                <div class="test-item" data-test="stream-cancel">
+                    <div class="test-name">
+                        Отмена генерации по кнопке "Остановить"
+                        <div class="test-details">Требование 2.3, Свойство 6</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="stream-error">
+                    <div class="test-name">
+                        Обработка ошибок с сохранением частичного ответа
+                        <div class="test-details">Требование 2.5, Свойство 8</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="stream-resume">
+                    <div class="test-name">
+                        Восстановление streaming после разрыва
+                        <div class="test-details">Требование 2.6, Свойство 9</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Кэш тесты -->
+        <div class="test-section">
+            <h2>3. Кэширование сообщений в localStorage</h2>
+            
+            <div class="test-group">
+                <h3>Базовое кэширование</h3>
+                <div class="test-item" data-test="cache-save">
+                    <div class="test-name">
+                        Сохранение новых сообщений в кэш
+                        <div class="test-details">Требование 3.1, Свойство 10</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="cache-load">
+                    <div class="test-name">
+                        Быстрое отображение кэша за < 100ms
+                        <div class="test-details">Требование 3.2, Свойство 11</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="cache-background-sync">
+                    <div class="test-name">
+                        Фоновая синхронизация с сервером
+                        <div class="test-details">Требование 3.3, Свойство 12</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+            </div>
+            
+            <div class="test-group">
+                <h3>Управление размером</h3>
+                <div class="test-item" data-test="cache-limit-count">
+                    <div class="test-name">
+                        Ограничение до 100 сообщений на диалог
+                        <div class="test-details">Требование 3.5, Свойство 14</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="cache-limit-size">
+                    <div class="test-name">
+                        Ограничение общего размера до 5MB
+                        <div class="test-details">Требование 3.6-3.7, Свойство 15</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="cache-cleanup">
+                    <div class="test-name">
+                        Очистка сообщений старше 24 часов
+                        <div class="test-details">Требование 3.6, Свойство 15</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Виртуализация тесты -->
+        <div class="test-section">
+            <h2>4. Виртуализация списка сообщений</h2>
+            
+            <div class="test-group">
+                <h3>Рендеринг и производительность</h3>
+                <div class="test-item" data-test="virtual-render">
+                    <div class="test-name">
+                        Рендеринг только видимых элементов (>50 сообщений)
+                        <div class="test-details">Требование 4.1, Свойство 16</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="virtual-scroll-fps">
+                    <div class="test-name">
+                        Плавная прокрутка >= 60 FPS
+                        <div class="test-details">Требование 4.2, Свойство 17</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="virtual-load-history">
+                    <div class="test-name">
+                        Подгрузка истории при прокрутке к началу
+                        <div class="test-details">Требование 4.3, Свойство 18</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+            </div>
+            
+            <div class="test-group">
+                <h3>Навигация и поиск</h3>
+                <div class="test-item" data-test="virtual-search">
+                    <div class="test-name">
+                        Поиск по всем сообщениям (включая не отрендеренные)
+                        <div class="test-details">Требование 4.4, Свойство 19</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="virtual-auto-scroll">
+                    <div class="test-name">
+                        Автопрокрутка к новым сообщениям
+                        <div class="test-details">Требование 4.6, Свойство 20</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Черновики тесты -->
+        <div class="test-section">
+            <h2>5. Автосохранение черновиков</h2>
+            
+            <div class="test-group">
+                <h3>Сохранение и загрузка</h3>
+                <div class="test-item" data-test="draft-debounce">
+                    <div class="test-name">
+                        Debouncing автосохранения (2 секунды)
+                        <div class="test-details">Требование 5.1, Свойство 21</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="draft-switch">
+                    <div class="test-name">
+                        Переключение черновиков между диалогами
+                        <div class="test-details">Требование 5.2, Свойство 22</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="draft-restore">
+                    <div class="test-name">
+                        Восстановление после перезагрузки
+                        <div class="test-details">Требование 5.3, Свойство 23</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+            </div>
+            
+            <div class="test-group">
+                <h3>Управление</h3>
+                <div class="test-item" data-test="draft-clear">
+                    <div class="test-name">
+                        Удаление черновика после отправки
+                        <div class="test-details">Требование 5.4, Свойство 24</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="draft-cleanup">
+                    <div class="test-name">
+                        Очистка черновиков старше 7 дней
+                        <div class="test-details">Требование 5.5, Свойство 25</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="draft-no-empty">
+                    <div class="test-name">
+                        Предотвращение пустых черновиков
+                        <div class="test-details">Требование 5.6, Свойство 26</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Graceful degradation тесты -->
+        <div class="test-section">
+            <h2>6. Graceful Degradation</h2>
+            
+            <div class="test-group">
+                <h3>Fallback механизмы</h3>
+                <div class="test-item" data-test="fallback-http">
+                    <div class="test-name">
+                        Работа через HTTP при недоступности WebSocket
+                        <div class="test-details">Требование 6.1, Свойство 27</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="fallback-no-streaming">
+                    <div class="test-name">
+                        Работа без streaming (полный ответ)
+                        <div class="test-details">Требование 6.2, Свойство 28</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="fallback-no-localstorage">
+                    <div class="test-name">
+                        Работа без localStorage (приватный режим)
+                        <div class="test-details">Требование 6.3</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="fallback-no-virtualization">
+                    <div class="test-name">
+                        Работа без виртуализации (старые браузеры)
+                        <div class="test-details">Требование 6.4</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Мониторинг тесты -->
+        <div class="test-section">
+            <h2>7. Мониторинг производительности</h2>
+            
+            <div class="test-group">
+                <h3>Логирование и метрики</h3>
+                <div class="test-item" data-test="monitor-logging">
+                    <div class="test-name">
+                        Полнота логирования событий
+                        <div class="test-details">Требование 7.1, Свойство 30</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="monitor-ttfb">
+                    <div class="test-name">
+                        Измерение TTFB для streaming
+                        <div class="test-details">Требование 7.2, Свойство 31</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="monitor-fps">
+                    <div class="test-name">
+                        Мониторинг FPS прокрутки
+                        <div class="test-details">Требование 7.3, Свойство 32</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+                <div class="test-item" data-test="monitor-cache">
+                    <div class="test-name">
+                        Логирование операций с кэшем
+                        <div class="test-details">Требование 7.4, Свойство 30</div>
+                    </div>
+                    <span class="test-status pending">Ожидание</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Сводка -->
+        <div class="summary">
+            <h2>📊 Сводка результатов</h2>
+            <div class="summary-stats">
+                <div class="summary-stat">
+                    <span class="label">Всего тестов:</span>
+                    <span class="value" id="totalTests">0</span>
+                </div>
+                <div class="summary-stat">
+                    <span class="label">Пройдено:</span>
+                    <span class="value passed" id="passedTests">0</span>
+                </div>
+                <div class="summary-stat">
+                    <span class="label">Провалено:</span>
+                    <span class="value failed" id="failedTests">0</span>
+                </div>
+                <div class="summary-stat">
+                    <span class="label">Процент успеха:</span>
+                    <span class="value" id="successRate">0%</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Лог -->
+        <div class="log-container" id="logContainer">
+            <div class="log-entry info">
+                <span class="log-timestamp">[00:00:00]</span>
+                <span>Система тестирования готова. Нажмите "Запустить все тесты" для начала.</span>
+            </div>
+        </div>
+    </div>
+    
+    <script src="app.js"></script>
+    <script src="test-integration.js"></script>
+</body>
+</html>

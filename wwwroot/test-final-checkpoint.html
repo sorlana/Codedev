@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Финальное тестирование - Real-time Chat Optimization</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #569cd6;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #858585;
+            margin-bottom: 30px;
+        }
+        
+        .test-controls {
+            background: #252526;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .btn {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .btn:hover {
+            background: #1177bb;
+        }
+        
+        .btn:disabled {
+            background: #3e3e42;
+            cursor: not-allowed;
+        }
+        
+        .test-section {
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .test-section h2 {
+            color: #569cd6;
+            margin-bottom: 15px;
+        }
+        
+        .test-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: #1e1e1e;
+            border-left: 3px solid #3e3e42;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+        
+        .test-item.passed {
+            border-left-color: #4ec9b0;
+        }
+        
+        .test-item.failed {
+            border-left-color: #f48771;
+        }
+        
+        .test-item.running {
+            border-left-color: #dcdcaa;
+        }
+        
+        .test-status {
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }

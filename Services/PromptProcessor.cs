@@ -14,6 +14,7 @@ public class PromptProcessor : IPromptProcessor
     private readonly IDirectShellService _directShellService;
     private readonly IGitService _gitService;
     private readonly Lazy<ITaskExecutorService> _taskExecutorService;
+    private readonly IProjectManagementService _projectService;
     private readonly ILogger<PromptProcessor> _logger;
     private readonly CommandRecognizer _commandRecognizer;
     private readonly TasksFilePathResolver _tasksFilePathResolver;
@@ -25,6 +26,7 @@ public class PromptProcessor : IPromptProcessor
         IDirectShellService directShellService,
         IGitService gitService,
         Lazy<ITaskExecutorService> taskExecutorService,
+        IProjectManagementService projectService,
         ILogger<PromptProcessor> logger,
         CommandRecognizer commandRecognizer,
         TasksFilePathResolver tasksFilePathResolver)
@@ -35,6 +37,7 @@ public class PromptProcessor : IPromptProcessor
         _directShellService = directShellService;
         _gitService = gitService;
         _taskExecutorService = taskExecutorService;
+        _projectService = projectService;
         _logger = logger;
         _commandRecognizer = commandRecognizer;
         _tasksFilePathResolver = tasksFilePathResolver;
@@ -49,6 +52,15 @@ public class PromptProcessor : IPromptProcessor
 
         if (dialogue == null)
             throw new ArgumentException("Dialogue not found");
+        
+        // Получаем выбранный проект (приоритет над dialogue.ProjectPath)
+        var selectedProject = await _projectService.GetSelectedProjectAsync();
+        var projectPath = selectedProject?.Path ?? dialogue.ProjectPath;
+        
+        _logger.LogInformation(
+            "ProcessPromptAsync: используется путь проекта: {ProjectPath} (выбранный проект: {SelectedProject})",
+            projectPath,
+            selectedProject?.Name ?? "нет");
 
         // 2. Save user message
         var userMessage = new Message
@@ -67,7 +79,7 @@ public class PromptProcessor : IPromptProcessor
             _logger.LogInformation("Распознана команда агентского режима: {CommandType}, путь: {FilePath}", 
                 commandType, filePath ?? "(не указан)");
             
-            var commandResult = await ExecuteAgentCommandAsync(dialogueId, commandType, filePath, dialogue.ProjectPath);
+            var commandResult = await ExecuteAgentCommandAsync(dialogueId, commandType, filePath, projectPath);
             
             // Сохраняем ответ ассистента
             var assistantMessage = new Message
@@ -191,7 +203,7 @@ Respond in Russian, but call tools with English parameters."
 
                     try
                     {
-                        var result = await ExecuteFunctionCallAsync(functionCall, dialogue.ProjectPath);
+                        var result = await ExecuteFunctionCallAsync(functionCall, projectPath);
                         _logger.LogInformation("Function {FunctionName} executed successfully. Result length: {Length}", 
                             functionCall.Name, result?.Length ?? 0);
                         
@@ -537,7 +549,7 @@ Respond in Russian, but call tools with English parameters."
             new FunctionDefinition
             {
                 Name = "execute_shell_command",
-                Description = "Execute a shell command (e.g., dotnet build)",
+                Description = "Execute a Windows shell command in the project directory. Use this for file operations (create, delete, move files), running build commands, or any other shell operations. Examples: 'echo text > file.txt' to create a file, 'del file.txt' to delete a file, 'dotnet build' to build the project.",
                 Parameters = new Dictionary<string, object>
                 {
                     ["type"] = "object",
@@ -546,7 +558,7 @@ Respond in Russian, but call tools with English parameters."
                         ["command"] = new Dictionary<string, object>
                         {
                             ["type"] = "string",
-                            ["description"] = "The command to execute"
+                            ["description"] = "The Windows shell command to execute (e.g., 'echo Hello > file.txt', 'del file.txt', 'dotnet build')"
                         }
                     },
                     ["required"] = new[] { "command" }
@@ -555,7 +567,7 @@ Respond in Russian, but call tools with English parameters."
             new FunctionDefinition
             {
                 Name = "read_file",
-                Description = "Read the contents of a file",
+                Description = "Read the contents of an existing file from the project directory. Use this ONLY to read files that already exist. Provide just the filename (e.g., 'file.txt') or relative path (e.g., 'src/file.txt'), NOT absolute paths.",
                 Parameters = new Dictionary<string, object>
                 {
                     ["type"] = "object",
@@ -564,7 +576,7 @@ Respond in Russian, but call tools with English parameters."
                         ["filePath"] = new Dictionary<string, object>
                         {
                             ["type"] = "string",
-                            ["description"] = "The path to the file to read"
+                            ["description"] = "The relative path to the file (e.g., 'file.txt' or 'src/file.txt'). Do NOT use absolute paths or placeholders like '/path/to/directory'."
                         }
                     },
                     ["required"] = new[] { "filePath" }
@@ -615,8 +627,9 @@ Respond in Russian, but call tools with English parameters."
             { "ls -l", "dir" },
             { "cat ", "type " },
             { "cp ", "copy " },
-            { "rm ", "del " },
             { "rm -rf ", "rmdir /s /q " },
+            { "rm -f ", "del /f " },  // Добавлено: rm -f -> del /f
+            { "rm ", "del " },
             { "mv ", "move " },
             { "pwd", "cd" },
             { "touch ", "type nul > " },
@@ -884,5 +897,35 @@ Respond in Russian, but call tools with English parameters."
         }
 
         return null;
+    }
+    
+    /// <summary>
+    /// Получает список доступных инструментов для LLM (публичный метод для StreamingService)
+    /// </summary>
+    public List<FunctionDefinition> GetAvailableTools()
+    {
+        return GetSerenaToolDefinitions();
+    }
+    
+    /// <summary>
+    /// Выполняет функцию по имени с заданными аргументами (публичный метод для StreamingService)
+    /// </summary>
+    public async Task<string> ExecuteFunctionAsync(string functionName, Dictionary<string, object> arguments, string projectPath)
+    {
+        // Конвертируем Linux команды в Windows если нужно
+        if (functionName == "execute_shell_command" && arguments.ContainsKey("command"))
+        {
+            var command = arguments["command"]?.ToString() ?? "";
+            var convertedCommand = ConvertLinuxCommandToWindows(command);
+            arguments["command"] = convertedCommand;
+        }
+        
+        var functionCall = new FunctionCall
+        {
+            Name = functionName,
+            Arguments = arguments
+        };
+        
+        return await ExecuteFunctionCallAsync(functionCall, projectPath);
     }
 }

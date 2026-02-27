@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест кэширования и виртуализации</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #007bff;
+            padding-bottom: 10px;
+        }
+        
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .test-section h2 {
+            color: #007bff;
+            margin-top: 0;
+        }
+        
+        .test-item {
+            padding: 15px;
+            margin: 10px 0;
+            background: #f8f9fa;
+            border-left: 4px solid #28a745;
+            border-radius: 4px;
+        }
+        
+        .test-item h3 {
+            margin: 0 0 10px 0;
+            color: #333;
+            font-size: 16px;
+        }
+        
+        .test-item p {
+            margin: 5px 0;
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-pass {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-fail {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .instructions {
+            background: #e7f3ff;
+            padding: 15px;
+            border-left: 4px solid #007bff;
+            border-radius: 4px;
+            margin: 15px 0;
+        }
+        
+        .instructions h4 {
+            margin: 0 0 10px 0;
+            color: #007bff;
+        }
+        
+        .instructions ol {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        
+        .instructions li {
+            margin: 5px 0;
+            color: #333;
+        }
+        
+        .expected {
+            background: #d4edda;
+            padding: 10px;
+            border-left: 4px solid #28a745;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .expected h4 {
+            margin: 0 0 8px 0;
+            color: #28a745;
+            font-size: 14px;
+        }
+        
+        .expected ul {
+            margin: 5px 0;
+            padding-left: 20px;
+        }
+        
+        .expected li {
+            margin: 3px 0;
+            color: #155724;
+            font-size: 13px;
+        }
+        
+        .button-group {
+            margin: 20px 0;
+            display: flex;
+            gap: 10px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        
+        button:hover {
+            background: #0056b3;
+        }
+        
+        button.secondary {
+            background: #6c757d;
+        }
+        
+        button.secondary:hover {
+            background: #5a6268;
+        }
+        
+        .console-output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 15px 0;
+        }
+        
+        .console-output .log-cache {
+            color: #4ec9b0;
+        }
+        
+        .console-output .log-virtual {
+            color: #ce9178;
+        }
+        
+        .console-output .log-monitoring {
+            color: #dcdcaa;
+        }
+        
+        .console-output .log-search {
+            color: #9cdcfe;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+        }
+        
+        .alert-info {
+            background: #d1ecf1;
+            border-left: 4px solid #0c5460;
+            color: #0c5460;
+        }
+        
+        .alert-warning {
+            background: #fff3cd;
+            border-left: 4px solid #856404;
+            color: #856404;
+        }
+        
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Тестирование кэширования и виртуализации - Checkpoint 15</h1>
+    
+    <div class="alert alert-info">
+        <strong>ℹ️ Информация:</strong> Этот документ содержит подробные инструкции для ручного тестирования функций кэширования (MessageCache) и виртуализации (VirtualList). Перед началом тестирования убедитесь, что приложение запущено на <code>http://localhost:5000</code>
+    </div>
+    
+    <div class="button-group">
+        <button onclick="window.open('http://localhost:5000', '_blank')">🚀 Открыть приложение</button>
+        <button class="secondary" onclick="window.open('test-caching-virtualization.md', '_blank')">📄 Открыть полный план тестирования</button>
+    </div>
+    
+    <!-- Тест 1: Кэширование -->
+    <div class="test-section">
+        <h2>1️⃣ Тестирование кэширования сообщений</h2>
+        
+        <div class="test-item">
+            <h3>1.1 Мгновенное отображение кэшированных сообщений <span class="status status-pending">⏳ Ожидает</span></h3>
+            
+            <div class="instructions">
+                <h4>📋 Шаги тестирования:</h4>
+                <ol>
+                    <li>Откройте приложение в браузере</li>
+                    <li>Создайте новый диалог</li>
+                    <li>Отправьте 5-10 сообщений</li>
+                    <li>Переключитесь на другой диалог (или создайте новый)</li>
+                    <li>Вернитесь к первому диалогу</li>
+                    <li>Откройте DevTools (F12) → Console</li>
+                    <li>Наблюдайте за временем отображения</li>
+                </ol>
+            </div>
+            
+            <div class="expected">
+                <h4>✅ Ожидаемый результат:</h4>
+                <ul>
+                    <li>Сообщения отображаются мгновенно (< 100ms)</li>
+                    <li>В консоли: <code>[MessageCache] Загружено X сообщений из кэша</code></li>
+                    <li>Сообщения видны до завершения запроса к серверу</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="test-item">
+            <h3>1.2 Фоновая синхронизация с сервером <span class="status status-pending">⏳ Ожидает</span></h3>
+            
+            <div class="instructions">
+                <h4>📋 Шаги тестирования:</h4>
+                <ol>
+                    <li>Загрузите диалог с кэшированными сообщениями</li>
+                    <li>Откройте DevTools → Network</li>
+                    <li>Проверьте запросы к <code>/api/dialogues/{id}/messages</code></li>
+                </ol>
+            </div>
+            
+            <div class="expected">
+                <h4>✅ Ожидаемый результат:</h4>
+                <ul>
+                    <li>Запрос выполняется после отображения кэша</li>
+                    <li>UI не блокируется</li>
+                    <li>Новые сообщения добавляются плавно</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="test-item">
+            <h3>1.3 Ограничение размера кэша <span class="status status-pending">⏳ Ожидает</span></h3>
+            
+            <div class="instructions">
+                <h4>📋 Шаги тестирования:</h4>
+                <ol>
+                    <li>Создайте диалог с > 100 сообщениями</li>
+                    <li>Откройте DevTools → Application → Local Storage</li>
+                    <li>Найдите ключ <code>msg_cache_{dialogueId}</code></li>
+                    <li>Проверьте количество сообщений в кэше</li>
+                </ol>
+            </div>
+            
+            <div class="expected">
+                <h4>✅ Ожидаемый результат:</h4>
+                <ul>
+                    <li>Максимум 100 сообщений в кэше</li>
+                    <li>В консоли: <code>[MessageCache] Удалено X старых сообщений</code></li>
+                    <li>Общий размер кэша < 5MB</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Тест 2: Виртуализация -->
+    <div class="test-section">
+        <h2>2️⃣ Тестирование виртуализации списка</h2>
+        
+        <div class="test-item">
+            <h3>2.1 Виртуализация больших списков (>100 сообщений) <span class="status status-pending">⏳ Ожидает</span></h3>
+            
+            <div class="instructions">
+                <h4>📋 Шаги тестирования:</h4>
+                <ol>
+                    <li>Создайте диалог с 150-200 сообщениями</li>
+                    <li>Откройте DevTools → Elements</li>
+                    <li>Проверьте количество <code>.message</code> элементов в DOM</li>
+                    <li>Прокрутите список вверх и вниз</li>
+                    <li>Наблюдайте за изменениями в DOM</li>
+                </ol>
+            </div>
+            
+            <div class="expected">
+                <h4>✅ Ожидаемый результат:</h4>
+                <ul>
+                    <li>В DOM только видимые элементы + буфер (≈20-30 элементов)</li>
+                    <li>При прокрутке элементы добавляются/удаляются</li>
+                    <li>В консоли: <code>[VirtualList] Видимый диапазон: X - Y из Z</code></li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="test-item">
+            <h3>2.2 Плавность прокрутки <span class="status status-pending">⏳ Ожидает</span></h3>
+            
+            <div class="instructions">
+                <h4>📋 Шаги тестирования:</h4>
+                <ol>
+                    <li>Откройте диалог с > 100 сообщениями</li>
+                    <li>Быстро прокрутите список вверх и вниз</li>
+                    <li>Обратите внимание на плавность</li>
+                    <li>Откройте DevTools → Performance</li>
+                    <li>Запишите профиль во время прокрутки</li>
+                </ol>
+            </div>
+            
+            <div class="expected">
+                <h4>✅ Ожидаемый результат:</h4>
+                <ul>
+                    <li>Прокрутка плавная, без лагов</li>
+                    <li>FPS ≥ 30 (в идеале 60)</li>
+                    <li>Нет предупреждений о низком FPS в консоли</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="test-item">
+            <h3>2.3 Подгрузка истории при прокрутке к началу <span class="status status-pending">⏳ Ожидает</span></h3>
+            
+            <div class="instructions">
+                <h4>📋 Шаги тестирования:</h4>
+                <ol>
+                    <li>Откройте диалог с большим количеством сообщений</li>
+                    <li>Прокрутите к концу списка</li>
+                    <li>Быстро прокрутите к началу</li>
+                    <li>Наблюдайте за подгрузкой</li>
+                </ol>
+            </div>
+            
+            <div class="expected">
+                <h4>✅ Ожидаемый результат:</h4>
+                <ul>
+                    <li>При достижении порога загружаются предыдущие сообщения</li>
+                    <li>В консоли: <code>[VirtualList] Достигнут порог подгрузки истории</code></li>
+                    <li>Позиция прокрутки сохраняется</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Тест 3: Поиск -->
+    <div class="test-section">
+        <h2>3️⃣ Тестирование поиска по сообщениям</h2>
+        
+        <div class="test-item">
+            <h3>3.1 Поиск по всем сообщениям <span class="status status-pending">⏳ Ожидает</span></h3>
+            
+            <div class="instructions">
+                <h4>📋 Шаги тестирования:</h4>
+                <ol>
+                    <li>Откройте диалог с > 100 сообщениями</li>
+                    <li>Введите поисковый запрос</li>
+                    <li>Нажмите "🔍 Найти"</li>
+                    <li>Проверьте результаты</li>
+                </ol>
+            </div>
+            
+            <div class="expected">
+                <h4>✅ Ожидаемый результат:</h4>
+                <ul>
+                    <li>Поиск по всем сообщениям (включая не отрендеренные)</li>
+                    <li>В консоли: <code>[VirtualList] Найдено X совпадений</code></li>
+                    <li>Автоматическая прокрутка к первому результату</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="test-item">
+            <h3>3.2 Подсветка найденных сообщений <span class="status status-pending">⏳ Ожидает</span></h3>
+            
+            <div class="instructions">
+                <h4>📋 Шаги тестирования:</h4>
+                <ol>
+                    <li>Выполните поиск</li>
+                    <li>Проверьте подсветку результата</li>
+                    <li>Подождите 2 секунды</li>
+                </ol>
+            </div>
+            
+            <div class="expected">
+                <h4>✅ Ожидаемый результат:</h4>
+                <ul>
+                    <li>Сообщение подсвечивается желтым (#fff3cd)</li>
+                    <li>Подсветка исчезает через 2 секунды</li>
+                    <li>Плавная анимация</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Тест 4: Интеграция -->
+    <div class="test-section">
+        <h2>4️⃣ Интеграционное тестирование</h2>
+        
+        <div class="test-item">
+            <h3>4.1 Кэширование + Виртуализация <span class="status status-pending">⏳ Ожидает</span></h3>
+            
+            <div class="instructions">
+                <h4>📋 Шаги тестирования:</h4>
+                <ol>
+                    <li>Создайте диалог с > 100 сообщениями</li>
+                    <li>Закройте и снова откройте диалог</li>
+                    <li>Проверьте работу обоих компонентов</li>
+                </ol>
+            </div>
+            
+            <div class="expected">
+                <h4>✅ Ожидаемый результат:</h4>
+                <ul>
+                    <li>Кэш загружается мгновенно</li>
+                    <li>Виртуализация активна для списка > 50</li>
+                    <li>Нет конфликтов между компонентами</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="test-item">
+            <h3>4.2 Автопрокрутка к новым сообщениям <span class="status status-pending">⏳ Ожидает</span></h3>
+            
+            <div class="instructions">
+                <h4>📋 Шаги тестирования:</h4>
+                <ol>
+                    <li>Прокрутите к концу списка (в пределах 100px)</li>
+                    <li>Отправьте новое сообщение</li>
+                    <li>Проверьте автопрокрутку</li>
+                    <li>Затем прокрутите к середине списка</li>
+                    <li>Отправьте еще одно сообщение</li>
+                </ol>
+            </div>
+            
+            <div class="expected">
+                <h4>✅ Ожидаемый результат:</h4>
+                <ul>
+                    <li>Сценарий 1: Автопрокрутка выполняется</li>
+                    <li>Сценарий 2: Автопрокрутка НЕ выполняется</li>
+                    <li>Соответствующие логи в консоли</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Тест 5: Graceful Degradation -->
+    <div class="test-section">
+        <h2>5️⃣ Graceful Degradation</h2>
+        
+        <div class="test-item">
+            <h3>5.1 Работа без localStorage <span class="status status-pending">⏳ Ожидает</span></h3>
+            
+            <div class="instructions">
+                <h4>📋 Шаги тестирования:</h4>
+                <ol>
+                    <li>Откройте браузер в режиме инкогнито</li>
+                    <li>Откройте приложение</li>
+                    <li>Создайте диалог и отправьте сообщения</li>
+                </ol>
+            </div>
+            
+            <div class="expected">
+                <h4>✅ Ожидаемый результат:</h4>
+                <ul>
+                    <li>Приложение работает без кэширования</li>
+                    <li>В консоли: <code>[MessageCache] localStorage недоступен</code></li>
+                    <li>Функциональность не нарушена</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Полезные команды -->
+    <div class="test-section">
+        <h2>🛠️ Полезные команды для консоли браузера</h2>
+        
+        <div class="console-output">
+<span class="log-cache">// Проверка кэша в localStorage</span>
+Object.keys(localStorage).filter(k => k.startsWith('msg_cache_'))
+
+<span class="log-virtual">// Проверка количества DOM элементов сообщений</span>
+document.querySelectorAll('.message').length
+
+<span class="log-monitoring">// Проверка состояния VirtualList</span>
+virtualList ? virtualList.items.length : 'VirtualList не инициализирован'
+
+<span class="log-search">// Проверка MessageCache</span>
+messageCache ? messageCache.isAvailable : 'MessageCache не инициализирован'
+
+<span class="log-cache">// Очистка всего кэша (для повторного тестирования)</span>
+Object.keys(localStorage).filter(k => k.startsWith('msg_cache_')).forEach(k => localStorage.removeItem(k))
+
+<span class="log-virtual">// Создание тестовых сообщений (осторожно - создаст много сообщений!)</span>
+async function createTestMessages(count) {
+    for (let i = 1; i <= count; i++) {
+        const input = document.getElementById('prompt-input');
+        input.value = `Тестовое сообщение ${i}`;
+        document.getElementById('send-button').click();
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+}
+// Использование: createTestMessages(50)
+        </div>
+    </div>
+    
+    <!-- Итоговая информация -->
+    <div class="alert alert-warning">
+        <strong>⚠️ Важно:</strong> После завершения всех тестов обновите статус задачи 15 в файле <code>.kiro/specs/real-time-chat-optimization/tasks.md</code> и сообщите о результатах.
+    </div>
+    
+    <div class="button-group">
+        <button onclick="window.print()">🖨️ Распечатать план тестирования</button>
+        <button class="secondary" onclick="window.location.reload()">🔄 Обновить страницу</button>
+    </div>
+    
+    <script>
+        // Автоматическая проверка доступности приложения
+        fetch('http://localhost:5000')
+            .then(response => {
+                if (response.ok) {
+                    console.log('✅ Приложение доступно на http://localhost:5000');
+                }
+            })
+            .catch(error => {
+                console.warn('⚠️ Приложение недоступно. Запустите: dotnet run');
+                alert('⚠️ Приложение недоступно на http://localhost:5000\n\nЗапустите приложение командой: dotnet run');
+            });
+    </script>
+</body>
+</html>

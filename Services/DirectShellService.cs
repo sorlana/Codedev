@@ -89,6 +89,28 @@ public class DirectShellService : IDirectShellService
             _logger.LogInformation("Command executed successfully");
             _logger.LogInformation("=== Shell Command Execution End ===");
             
+            // Для команд удаления файлов проверяем, удалился ли файл
+            if ((command.Contains("del ", StringComparison.OrdinalIgnoreCase) || 
+                 command.Contains("rm ", StringComparison.OrdinalIgnoreCase)) && 
+                command.Contains("."))
+            {
+                var fileName = ExtractFileNameFromDeleteCommand(command);
+                if (!string.IsNullOrEmpty(fileName))
+                {
+                    var filePath = Path.Combine(workingDirectory, fileName);
+                    _logger.LogInformation("Проверка удаления файла: {FilePath}", filePath);
+                    
+                    if (!File.Exists(filePath))
+                    {
+                        return $"Файл '{fileName}' успешно удален из директории {workingDirectory}";
+                    }
+                    else
+                    {
+                        return $"Команда выполнена, но файл '{fileName}' все еще существует в директории {workingDirectory}";
+                    }
+                }
+            }
+            
             // Для команд создания файлов проверяем, создался ли файл
             if (command.Contains(">") && command.Contains("."))
             {
@@ -125,6 +147,34 @@ public class DirectShellService : IDirectShellService
             if (parts.Length >= 2)
             {
                 return parts[1].Trim();
+            }
+        }
+        catch
+        {
+            // Игнорируем ошибки парсинга
+        }
+        return string.Empty;
+    }
+    
+    private string ExtractFileNameFromDeleteCommand(string command)
+    {
+        try
+        {
+            // Удаляем команду del/rm и флаги
+            var cleaned = command
+                .Replace("del ", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("rm ", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("/f", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("/q", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("-f", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("-rf", "", StringComparison.OrdinalIgnoreCase)
+                .Trim();
+
+            // Берем первое слово (имя файла)
+            var parts = cleaned.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length > 0 && parts[0].Contains("."))
+            {
+                return parts[0];
             }
         }
         catch

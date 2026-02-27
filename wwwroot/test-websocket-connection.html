@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест WebSocket подключения</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 5px;
+        }
+        .test-section h2 {
+            margin-top: 0;
+            color: #555;
+            font-size: 18px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 3px 0;
+        }
+        .log-entry.info { color: #4ec9b0; }
+        .log-entry.error { color: #f48771; }
+        .log-entry.success { color: #b5cea8; }
+        .log-entry.warning { color: #dcdcaa; }
+        .status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .status.connecting {
+            background: #fff3cd;
+            color: #856404;
+        }
+        input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 100px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 Тест WebSocket подключения</h1>
+        
+        <div class="test-section">
+            <h2>Параметры подключения</h2>
+            <label>
+                Dialogue ID: 
+                <input type="number" id="dialogueId" value="1" min="1">
+            </label>
+            <span id="connectionStatus" class="status disconnected">Отключено</span>
+        </div>
+
+        <div class="test-section">
+            <h2>Управление</h2>
+            <button id="connectBtn" onclick="testConnect()">Подключиться</button>
+            <button id="disconnectBtn" onclick="testDisconnect()" disabled>Отключиться</button>
+            <button id="sendPingBtn" onclick="testSendPing()" disabled>Отправить Ping</button>
+            <button id="sendMessageBtn" onclick="testSendMessage()" disabled>Отправить сообщение</button>
+            <button onclick="clearLog()">Очистить лог</button>
+        </div>
+
+        <div class="test-section">
+            <h2>Лог событий</h2>
+            <div id="log" class="log"></div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let connectionStartTime = null;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString('ru-RU', { hour12: false, fractionalSecondDigits: 3 });
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${timestamp}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateStatus(status) {
+            const statusEl = document.getElementById('connectionStatus');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const sendPingBtn = document.getElementById('sendPingBtn');
+            const sendMessageBtn = document.getElementById('sendMessageBtn');
+
+            statusEl.className = `status ${status}`;
+            
+            if (status === 'connected') {
+                statusEl.textContent = 'Подключено';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                sendPingBtn.disabled = false;
+                sendMessageBtn.disabled = false;
+            } else if (status === 'connecting') {
+                statusEl.textContent = 'Подключение...';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = true;
+                sendPingBtn.disabled = true;
+                sendMessageBtn.disabled = true;
+            } else {
+                statusEl.textContent = 'Отключено';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                sendPingBtn.disabled = true;
+                sendMessageBtn.disabled = true;
+            }
+        }
+
+        function testConnect() {
+            const dialogueId = document.getElementById('dialogueId').value;
+            
+            if (!dialogueId || dialogueId < 1) {
+                log('❌ Неверный Dialogue ID', 'error');
+                return;
+            }
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            const wsUrl = `${protocol}//${host}/ws?dialogueId=${dialogueId}`;
+
+            log(`🔌 Подключение к ${wsUrl}...`, 'info');
+            updateStatus('connecting');
+            connectionStartTime = performance.now();
+
+            try {
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = (event) => {
+                    const connectionTime = (performance.now() - connectionStartTime).toFixed(2);
+                    log(`✅ WebSocket подключен (${connectionTime}ms)`, 'success');
+                    log(`   ReadyState: ${ws.readyState} (OPEN)`, 'info');
+                    updateStatus('connected');
+                };
+
+                ws.onmessage = (event) => {
+                    log(`📨 Получено сообщение:`, 'info');
+                    try {
+                        const data = JSON.parse(event.data);
+                        log(`   Type: ${data.type || data.Type || 'undefined'}`, 'info');
+                        log(`   Payload: ${JSON.stringify(data.payload || data.Payload || {})}`, 'info');
+                        
+                        if (data.type === 'connection_ack' || data.Type === 'connection_ack') {
+                            log(`✅ Получено подтверждение подключения (connection_ack)`, 'success');
+                        }
+                    } catch (e) {
+                        log(`   Raw: ${event.data}`, 'warning');
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    log(`❌ Ошибка WebSocket`, 'error');
+                    console.error('WebSocket error:', error);
+                };
+
+                ws.onclose = (event) => {
+                    const reason = event.reason || 'нет причины';
+                    log(`🔌 WebSocket закрыт: код ${event.code}, причина: ${reason}`, event.code === 1000 ? 'info' : 'error');
+                    log(`   Clean: ${event.wasClean}`, 'info');
+                    updateStatus('disconnected');
+                    ws = null;
+                };
+
+            } catch (error) {
+                log(`❌ Ошибка создания WebSocket: ${error.message}`, 'error');
+                updateStatus('disconnected');
+            }
+        }
+
+        function testDisconnect() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                log('🔌 Закрытие соединения...', 'info');
+                ws.close(1000, 'User requested disconnect');
+            } else {
+                log('⚠️ WebSocket не подключен', 'warning');
+            }
+        }
+
+        function testSendPing() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('❌ WebSocket не подключен', 'error');
+                return;
+            }
+
+            const message = {
+                type: 'ping',
+                payload: {},
+                timestamp: new Date().toISOString()
+            };
+
+            log('📤 Отправка ping...', 'info');
+            ws.send(JSON.stringify(message));
+            log(`   Отправлено: ${JSON.stringify(message)}`, 'info');
+        }
+
+        function testSendMessage() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('❌ WebSocket не подключен', 'error');
+                return;
+            }
+
+            const dialogueId = parseInt(document.getElementById('dialogueId').value);
+            const message = {
+                type: 'user_message',
+                payload: {
+                    dialogueId: dialogueId,
+                    content: 'Тестовое сообщение от клиента'
+                },
+                timestamp: new Date().toISOString()
+            };
+
+            log('📤 Отправка тестового сообщения...', 'info');
+            ws.send(JSON.stringify(message));
+            log(`   Отправлено: ${JSON.stringify(message)}`, 'info');
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            log('Лог очищен', 'info');
+        }
+
+        // Инициализация
+        log('✅ Страница загружена, готов к тестированию', 'success');
+        log(`   Текущий хост: ${window.location.host}`, 'info');
+    </script>
+</body>
+</html>

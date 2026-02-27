@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест DraftManager</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .test-section h3 {
+            margin-top: 0;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .log {
+            background: #f5f5f5;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>Тест DraftManager</h1>
+    
+    <div class="test-section">
+        <h3>Тест 1: Сохранение черновика с debouncing</h3>
+        <p>Введите текст и подождите 2 секунды. Черновик должен сохраниться автоматически.</p>
+        <textarea id="draft-input-1" placeholder="Введите текст черновика..."></textarea>
+        <div>
+            <button onclick="testSaveDraft()">Сохранить с debouncing</button>
+            <button onclick="testLoadDraft()">Загрузить черновик</button>
+            <button onclick="testClearDraft()">Удалить черновик</button>
+        </div>
+        <div class="log" id="log-1"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Тест 2: Немедленное сохранение</h3>
+        <p>Черновик сохраняется немедленно без задержки.</p>
+        <textarea id="draft-input-2" placeholder="Введите текст черновика..."></textarea>
+        <div>
+            <button onclick="testSaveDraftImmediate()">Сохранить немедленно</button>
+            <button onclick="testLoadDraft()">Загрузить черновик</button>
+        </div>
+        <div class="log" id="log-2"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Тест 3: Предотвращение пустых черновиков</h3>
+        <p>Попытка сохранить пустой текст или только пробелы не должна создавать черновик.</p>
+        <textarea id="draft-input-3" placeholder="Оставьте пустым или введите только пробелы..."></textarea>
+        <div>
+            <button onclick="testEmptyDraft()">Попытаться сохранить пустой</button>
+            <button onclick="testLoadDraft()">Проверить наличие черновика</button>
+        </div>
+        <div class="log" id="log-3"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Тест 4: Очистка устаревших черновиков</h3>
+        <p>Создание черновика с устаревшей датой и проверка очистки.</p>
+        <div>
+            <button onclick="testCreateExpiredDraft()">Создать устаревший черновик</button>
+            <button onclick="testCleanExpiredDrafts()">Очистить устаревшие</button>
+            <button onclick="testCheckExpiredDraft()">Проверить наличие</button>
+        </div>
+        <div class="log" id="log-4"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Тест 5: Проверка localStorage</h3>
+        <p>Просмотр всех черновиков в localStorage.</p>
+        <div>
+            <button onclick="testListAllDrafts()">Показать все черновики</button>
+            <button onclick="testClearAllDrafts()">Удалить все черновики</button>
+        </div>
+        <div class="log" id="log-5"></div>
+    </div>
+
+    <script>
+        // Копируем класс DraftManager из app.js
+        class DraftManager {
+            constructor() {
+                this.draftPrefix = 'draft_';
+                this.saveDelay = 2000;
+                this.saveTimeout = null;
+                this.ttl = 7 * 24 * 60 * 60 * 1000;
+                this.isAvailable = this.checkLocalStorageAvailability();
+                
+                if (!this.isAvailable) {
+                    console.warn('[DraftManager] localStorage недоступен');
+                }
+            }
+            
+            checkLocalStorageAvailability() {
+                try {
+                    const test = '__localStorage_test__';
+                    localStorage.setItem(test, test);
+                    localStorage.removeItem(test);
+                    return true;
+                } catch (e) {
+                    return false;
+                }
+            }
+            
+            saveDraft(dialogueId, content) {
+                if (!this.isAvailable) return;
+                
+                if (!content || content.trim() === '') {
+                    log(1, 'Пустой контент, черновик не сохраняется', 'error');
+                    return;
+                }
+                
+                if (this.saveTimeout) {
+                    clearTimeout(this.saveTimeout);
+                }
+                
+                this.saveTimeout = setTimeout(() => {
+                    this.saveDraftImmediate(dialogueId, content);
+                }, this.saveDelay);
+                
+                log(1, `Запланировано сохранение через ${this.saveDelay}ms`, 'success');
+            }
+            
+            saveDraftImmediate(dialogueId, content) {
+                if (!this.isAvailable) return;
+                
+                if (!content || content.trim() === '') {
+                    log(2, 'Пустой контент, черновик не сохраняется', 'error');
+                    return;
+                }
+                
+                try {
+                    const key = this.draftPrefix + dialogueId;
+                    const data = {
+                        dialogueId: dialogueId,
+                        content: content,
+                        savedAt: new Date().toISOString()
+                    };
+                    
+                    localStorage.setItem(key, JSON.stringify(data));
+                    log(2, `Черновик сохранен (${content.length} символов)`, 'success');
+                } catch (error) {
+                    log(2, 'Ошибка сохранения: ' + error.message, 'error');
+                }
+            }
+            
+            loadDraft(dialogueId) {
+                if (!this.isAvailable) return null;
+                
+                try {
+                    const key = this.draftPrefix + dialogueId;
+                    const cached = localStorage.getItem(key);
+                    
+                    if (!cached) {
+                        return null;
+                    }
+                    
+                    const data = JSON.parse(cached);
+                    const savedAt = new Date(data.savedAt);
+                    const now = new Date();
+                    const age = now - savedAt;
+                    
+                    if (age > this.ttl) {
+                        localStorage.removeItem(key);
+                        return null;
+                    }
+                    
+                    return data.content;
+                } catch (error) {
+                    return null;
+                }
+            }
+            
+            clearDraft(dialogueId) {
+                if (!this.isAvailable) return;
+                
+                try {
+                    const key = this.draftPrefix + dialogueId;
+                    localStorage.removeItem(key);
+                    log(1, 'Черновик удален', 'success');
+                } catch (error) {
+                    log(1, 'Ошибка удаления: ' + error.message, 'error');
+                }
+            }
+            
+            cleanExpiredDrafts() {
+                if (!this.isAvailable) return;
+                
+                try {
+                    const now = new Date();
+                    let cleanedCount = 0;
+                    
+                    for (let i = localStorage.length - 1; i >= 0; i--) {
+                        const key = localStorage.key(i);
+                        
+                        if (key && key.startsWith(this.draftPrefix)) {
+                            try {
+                                const cached = localStorage.getItem(key);
+                                if (cached) {
+                                    const data = JSON.parse(cached);
+                                    const savedAt = new Date(data.savedAt);
+                                    const age = now - savedAt;
+                                    
+                                    if (age > this.ttl) {
+                                        localStorage.removeItem(key);
+                                        cleanedCount++;
+                                    }
+                                }
+                            } catch (error) {
+                                localStorage.removeItem(key);
+                                cleanedCount++;
+                            }
+                        }
+                    }
+                    
+                    log(4, `Очищено ${cleanedCount} устаревших черновиков`, 'success');
+                } catch (error) {
+                    log(4, 'Ошибка очистки: ' + error.message, 'error');
+                }
+            }
+        }
+        
+        // Инициализация
+        const draftManager = new DraftManager();
+        const TEST_DIALOGUE_ID = 999;
+        
+        // Вспомогательная функция для логирования
+        function log(section, message, type = '') {
+            const logElement = document.getElementById(`log-${section}`);
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'success' ? 'success' : type === 'error' ? 'error' : '';
+            logElement.innerHTML += `<div class="${className}">[${timestamp}] ${message}</div>`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+        
+        // Тест 1: Сохранение с debouncing
+        function testSaveDraft() {
+            const content = document.getElementById('draft-input-1').value;
+            draftManager.saveDraft(TEST_DIALOGUE_ID, content);
+        }
+        
+        function testLoadDraft() {
+            const draft = draftManager.loadDraft(TEST_DIALOGUE_ID);
+            if (draft) {
+                document.getElementById('draft-input-1').value = draft;
+                log(1, `Черновик загружен: "${draft.substring(0, 50)}..."`, 'success');
+            } else {
+                log(1, 'Черновик не найден', 'error');
+            }
+        }
+        
+        function testClearDraft() {
+            draftManager.clearDraft(TEST_DIALOGUE_ID);
+        }
+        
+        // Тест 2: Немедленное сохранение
+        function testSaveDraftImmediate() {
+            const content = document.getElementById('draft-input-2').value;
+            draftManager.saveDraftImmediate(TEST_DIALOGUE_ID, content);
+        }
+        
+        // Тест 3: Пустые черновики
+        function testEmptyDraft() {
+            const content = document.getElementById('draft-input-3').value;
+            log(3, `Попытка сохранить: "${content}"`, '');
+            draftManager.saveDraftImmediate(TEST_DIALOGUE_ID, content);
+        }
+        
+        // Тест 4: Устаревшие черновики
+        function testCreateExpiredDraft() {
+            const key = 'draft_' + TEST_DIALOGUE_ID;
+            const expiredDate = new Date();
+            expiredDate.setDate(expiredDate.getDate() - 8); // 8 дней назад
+            
+            const data = {
+                dialogueId: TEST_DIALOGUE_ID,
+                content: 'Устаревший черновик',
+                savedAt: expiredDate.toISOString()
+            };
+            
+            localStorage.setItem(key, JSON.stringify(data));
+            log(4, 'Создан устаревший черновик (8 дней назад)', 'success');
+        }
+        
+        function testCleanExpiredDrafts() {
+            draftManager.cleanExpiredDrafts();
+        }
+        
+        function testCheckExpiredDraft() {
+            const draft = draftManager.loadDraft(TEST_DIALOGUE_ID);
+            if (draft) {
+                log(4, 'Устаревший черновик все еще существует!', 'error');
+            } else {
+                log(4, 'Устаревший черновик успешно удален', 'success');
+            }
+        }
+        
+        // Тест 5: Просмотр всех черновиков
+        function testListAllDrafts() {
+            const drafts = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('draft_')) {
+                    const data = JSON.parse(localStorage.getItem(key));
+                    drafts.push({
+                        key: key,
+                        dialogueId: data.dialogueId,
+                        length: data.content.length,
+                        savedAt: data.savedAt
+                    });
+                }
+            }
+            
+            if (drafts.length === 0) {
+                log(5, 'Черновиков не найдено', '');
+            } else {
+                log(5, `Найдено черновиков: ${drafts.length}`, 'success');
+                drafts.forEach(d => {
+                    log(5, `- ${d.key}: ${d.length} символов, сохранен ${new Date(d.savedAt).toLocaleString()}`, '');
+                });
+            }
+        }
+        
+        function testClearAllDrafts() {
+            const keys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('draft_')) {
+                    keys.push(key);
+                }
+            }
+            
+            keys.forEach(key => localStorage.removeItem(key));
+            log(5, `Удалено черновиков: ${keys.length}`, 'success');
+        }
+        
+        // Автоматическое сохранение при вводе в первом поле
+        document.getElementById('draft-input-1').addEventListener('input', (e) => {
+            testSaveDraft();
+        });
+    </script>
+</body>
+</html>

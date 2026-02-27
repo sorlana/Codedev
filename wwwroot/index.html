@@ -66,6 +66,31 @@
             background: rgba(0, 0, 0, 0.1);
         }
 
+        .warning-action-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            margin-right: 8px;
+        }
+
+        .warning-action-btn:hover:not(:disabled) {
+            background: #0056b3;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .warning-action-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
         #app {
             display: flex;
             width: 100%;
@@ -408,6 +433,162 @@
             min-height: 0;
         }
 
+        /* Индикатор статуса соединения */
+        #connection-status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .status-icon {
+            font-size: 16px;
+            line-height: 1;
+        }
+
+        .status-label {
+            color: #333;
+        }
+
+        /* Статусы соединения с цветовой кодировкой */
+        #connection-status-indicator.status-connected .status-icon {
+            color: #28a745; /* Зеленый - WebSocket активен */
+        }
+
+        #connection-status-indicator.status-http .status-icon {
+            color: #ffc107; /* Желтый - HTTP режим */
+        }
+
+        #connection-status-indicator.status-disconnected .status-icon,
+        #connection-status-indicator.status-error .status-icon {
+            color: #dc3545; /* Красный - Отключено/Ошибка */
+        }
+
+        #connection-status-indicator.status-reconnecting .status-icon {
+            color: #ffc107; /* Желтый - Переподключение */
+            animation: pulse-status 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse-status {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.4;
+            }
+        }
+
+        /* Стили для индикатора статуса модели */
+        #model-status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .model-status-icon {
+            font-size: 16px;
+            line-height: 1;
+        }
+
+        .model-status-label {
+            color: #333;
+        }
+
+        #model-status-indicator.model-active .model-status-icon {
+            color: #28a745; /* Зеленый - модель активна */
+        }
+
+        #model-status-indicator.model-inactive .model-status-icon {
+            color: #dc3545; /* Красный - модель неактивна */
+        }
+
+        #start-model-button:hover {
+            background: #0056b3;
+        }
+
+        #start-model-button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+
+        /* Стили для поиска по сообщениям */
+        #message-search-container {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        #message-search-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+
+        #message-search-input:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+
+        #search-button {
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        #search-button:hover {
+            background: #0056b3;
+        }
+
+        #search-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        #clear-search-button {
+            padding: 8px 16px;
+            background: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        #clear-search-button:hover {
+            background: #5a6268;
+        }
+
+        #search-results-info {
+            font-size: 12px;
+            color: #666;
+            padding: 0 8px;
+        }
+
         #message-list {
             flex: 1;
             overflow-y: auto;
@@ -447,6 +628,49 @@
         .message-content {
             white-space: pre-wrap;
             word-wrap: break-word;
+        }
+
+        /* Стили для индикатора "печатает..." */
+        .message.typing-indicator {
+            opacity: 0.7;
+        }
+
+        .typing-dots {
+            display: inline-flex;
+            gap: 4px;
+        }
+
+        .typing-dots span {
+            animation: typing-blink 1.4s infinite;
+            font-size: 20px;
+            line-height: 1;
+        }
+
+        .typing-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing-blink {
+            0%, 60%, 100% {
+                opacity: 0.3;
+            }
+            30% {
+                opacity: 1;
+            }
+        }
+
+        /* Стили для сообщений об ошибках */
+        .message.error {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+        }
+
+        .message.error .message-role {
+            color: #dc3545;
         }
 
         #message-input-container {
@@ -885,17 +1109,69 @@
         /* Стили для сообщений о прогрессе */
         .message.assistant.progress {
             background: #e7f3ff;
-            border-left: 4px solid #007bff;
         }
 
         .message.assistant.error {
             background: #f8d7da;
-            border-left: 4px solid #dc3545;
         }
 
         .message.assistant.success {
             background: #d4edda;
-            border-left: 4px solid #28a745;
+        }
+
+        /* Кнопка остановки генерации */
+        #streaming-controls {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+        }
+
+        .cancel-generation-btn {
+            padding: 10px 20px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 14px;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .cancel-generation-btn:hover {
+            background: #c82333;
+        }
+
+        .cancel-generation-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        /* Стили для streaming сообщений */
+        .message.streaming .message-content {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.8;
+            }
+        }
+
+        /* Стили для частичных ответов */
+        .message.partial {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+
+        .message.partial .message-role {
+            color: #856404;
         }
     </style>
 </head>
@@ -927,6 +1203,27 @@
 
         <div id="main-content">
             <div id="dialogue-view">
+                <!-- Индикатор статуса соединения -->
+                <div id="connection-status-indicator">
+                    <span class="status-icon">●</span>
+                    <span class="status-label">Отключено</span>
+                </div>
+                
+                <!-- Индикатор статуса модели -->
+                <div id="model-status-indicator" class="model-inactive" style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
+                    <span class="model-status-icon">●</span>
+                    <span class="model-status-label">Проверка модели...</span>
+                    <button id="start-model-button" style="display: none; padding: 4px 12px; font-size: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 8px;">🚀 Запустить</button>
+                </div>
+                
+                <!-- Поле поиска по сообщениям -->
+                <div id="message-search-container" style="display: none;">
+                    <input type="text" id="message-search-input" placeholder="Поиск по сообщениям...">
+                    <button id="search-button">🔍 Найти</button>
+                    <button id="clear-search-button">✕ Очистить</button>
+                    <span id="search-results-info"></span>
+                </div>
+                
                 <div id="message-list"></div>
                 <div id="message-input-container">
                     <!-- Индикатор статуса выполнения -->
@@ -942,6 +1239,13 @@
                         </button>
                         <button id="resume-execution-btn" class="execution-control-btn" style="display: none;">
                             Возобновить
+                        </button>
+                    </div>
+                    
+                    <!-- Кнопка остановки генерации (для streaming) -->
+                    <div id="streaming-controls" style="display: none; margin-bottom: 12px;">
+                        <button id="cancel-generation-btn" class="cancel-generation-btn">
+                            ⏹️ Остановить генерацию
                         </button>
                     </div>
                     

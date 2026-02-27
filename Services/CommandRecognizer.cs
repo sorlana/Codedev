@@ -20,9 +20,12 @@ public class CommandRecognizer
             "начни выполнение",
             "запусти выполнение",
             "выполни задачи",
+            "выполни все задачи",
             "start execution",
             "execute tasks",
-            "run tasks"
+            "execute all tasks",
+            "run tasks",
+            "run all tasks"
         },
         [AgentCommandType.StopExecution] = new()
         {
@@ -94,19 +97,22 @@ public class CommandRecognizer
     /// <summary>
     /// Извлекает путь к файлу из текста команды с использованием регулярных выражений.
     /// Поддерживает паттерны: "из файла X", "from file X", "из X.md", "from X.md"
+    /// Поддерживает любые имена файлов с расширением .md
     /// </summary>
     /// <param name="prompt">Текст промпта от пользователя</param>
     /// <returns>Извлеченный путь к файлу или null если путь не найден</returns>
     private string? ExtractFilePath(string prompt)
     {
         // Регулярные выражения для извлечения пути к файлу
-        // Паттерны: "из файла X", "из X", "from file X", "from X"
+        // Паттерны поддерживают любые имена файлов с расширением .md
         var patterns = new[]
         {
-            @"из\s+файла\s+([^\s]+)",           // "из файла tasks.md"
-            @"из\s+([^\s]+\.md)",                // "из tasks.md"
-            @"from\s+file\s+([^\s]+)",          // "from file tasks.md"
-            @"from\s+([^\s]+\.md)"               // "from tasks.md"
+            @"из\s+файла\s+([^\s]+\.md)",           // "из файла tasks.md", "из файла feature-plan.md"
+            @"из\s+([^\s]+\.md)",                    // "из tasks.md", "из my-tasks.md"
+            @"from\s+file\s+([^\s]+\.md)",          // "from file tasks.md", "from file plan.md"
+            @"from\s+([^\s]+\.md)",                  // "from tasks.md", "from feature.md"
+            @"файла\s+([^\s]+\.md)",                 // "задачи из файла plan.md"
+            @"file\s+([^\s]+\.md)"                   // "tasks from file plan.md"
         };
 
         foreach (var pattern in patterns)

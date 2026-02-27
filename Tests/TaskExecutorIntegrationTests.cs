@@ -304,6 +304,16 @@ public class MockPromptProcessor : IPromptProcessor
         await Task.Delay(500);
         return $"Задача выполнена успешно (mock response)";
     }
+    
+    public List<CSharpRefactoringAssistant.Models.FunctionDefinition> GetAvailableTools()
+    {
+        return new List<CSharpRefactoringAssistant.Models.FunctionDefinition>();
+    }
+    
+    public Task<string> ExecuteFunctionAsync(string functionName, Dictionary<string, object> arguments, string projectPath)
+    {
+        return Task.FromResult("Mock function result");
+    }
 }
 
 /// <summary>

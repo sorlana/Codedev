@@ -4,7 +4,7 @@ using CSharpRefactoringAssistant.Models;
 
 namespace CSharpRefactoringAssistant.Services;
 
-public class OllamaLlmService : ILlmService
+public class OllamaLlmService : ILlmService, IStreamingLlmService
 {
     private readonly HttpClient _httpClient;
     private readonly string _baseUrl;
@@ -161,4 +161,120 @@ public class OllamaLlmService : ILlmService
             throw new LlmException("Error sending prompt to Ollama", ex);
         }
     }
+
+    public async IAsyncEnumerable<string> StreamPromptAsync(
+        string prompt,
+        List<Message> history,
+        List<FunctionDefinition> tools,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("=== Ollama Streaming Request Start ===");
+        _logger.LogInformation("Model: {Model}", _model);
+        _logger.LogInformation("Prompt length: {Length}", prompt.Length);
+        
+        // Build messages array
+        var messages = new List<object>();
+        
+        foreach (var msg in history)
+        {
+            messages.Add(new
+            {
+                role = msg.Role,
+                content = msg.Content
+            });
+        }
+
+        messages.Add(new
+        {
+            role = "user",
+            content = prompt
+        });
+
+        // Build Ollama request with stream=true
+        var requestBody = new
+        {
+            model = _model,
+            messages = messages,
+            stream = true,
+            tools = tools.Count > 0 ? tools.Select(t => new
+            {
+                type = "function",
+                function = new
+                {
+                    name = t.Name,
+                    description = t.Description,
+                    parameters = t.Parameters
+                }
+            }).ToArray() : null
+        };
+
+        var requestJson = JsonSerializer.Serialize(requestBody, new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        });
+        
+        var requestContent = new StringContent(requestJson, Encoding.UTF8, "application/json");
+
+        _httpClient.DefaultRequestHeaders.Clear();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/api/chat")
+        {
+            Content = requestContent
+        };
+
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("Ollama API streaming error: {StatusCode} - {Error}", response.StatusCode, errorContent);
+            throw new LlmException($"Ollama API streaming error: {response.StatusCode} - {errorContent}");
+        }
+
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            // Парсинг JSON без try-catch (ошибки будут выброшены наружу)
+            JsonElement chunk;
+            if (!JsonHelper.TryDeserialize(line, out chunk))
+            {
+                _logger.LogWarning("Failed to parse streaming chunk: {Line}", line);
+                continue;
+            }
+            
+            // Проверяем флаг завершения
+            if (chunk.TryGetProperty("done", out var done) && done.GetBoolean())
+            {
+                _logger.LogInformation("Streaming completed");
+                break;
+            }
+            
+            // Извлекаем содержимое из message.content
+            if (chunk.TryGetProperty("message", out var message))
+            {
+                if (message.TryGetProperty("content", out var contentProp))
+                {
+                    var contentChunk = contentProp.GetString();
+                    if (!string.IsNullOrEmpty(contentChunk))
+                    {
+                        _logger.LogDebug("Yielding chunk: {Length} chars", contentChunk.Length);
+                        yield return contentChunk;
+                    }
+                }
+            }
+        }
+        
+        _logger.LogInformation("=== Ollama Streaming Request End ===");
+    }
 }
+

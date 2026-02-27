@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест MessageCache</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .test-section h3 {
+            margin-top: 0;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+        #output {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Тест MessageCache</h1>
+    
+    <div class="test-section">
+        <h3>Тест 1: Проверка доступности localStorage</h3>
+        <button onclick="testLocalStorageAvailability()">Запустить тест</button>
+        <div id="test1-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Тест 2: Сохранение и загрузка сообщений</h3>
+        <button onclick="testCacheMessages()">Запустить тест</button>
+        <div id="test2-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Тест 3: Добавление одного сообщения</h3>
+        <button onclick="testAddMessage()">Запустить тест</button>
+        <div id="test3-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Тест 4: Ограничение количества сообщений (100)</h3>
+        <button onclick="testTrimCache()">Запустить тест</button>
+        <div id="test4-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Тест 5: Очистка устаревшего кэша</h3>
+        <button onclick="testCleanExpiredCache()">Запустить тест</button>
+        <div id="test5-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Тест 6: Проверка размера кэша (5MB лимит)</h3>
+        <button onclick="testCheckCacheSize()">Запустить тест</button>
+        <div id="test6-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Тест 7: Обработка QuotaExceededError</h3>
+        <button onclick="testQuotaExceeded()">Запустить тест</button>
+        <div id="test7-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Очистка тестовых данных</h3>
+        <button onclick="clearTestData()">Очистить все тестовые данные</button>
+    </div>
+    
+    <h2>Вывод консоли:</h2>
+    <div id="output"></div>
+    
+    <script>
+        // Копируем класс MessageCache из app.js
+        class MessageCache {
+            constructor() {
+                this.cachePrefix = 'msg_cache_';
+                this.maxMessagesPerDialogue = 100;
+                this.maxCacheSize = 5 * 1024 * 1024; // 5MB
+                this.ttl = 24 * 60 * 60 * 1000; // 24 часа в миллисекундах
+                this.isAvailable = this.checkLocalStorageAvailability();
+                
+                if (!this.isAvailable) {
+                    console.warn('[MessageCache] localStorage недоступен, кэширование отключено');
+                }
+            }
+            
+            checkLocalStorageAvailability() {
+                try {
+                    const test = '__localStorage_test__';
+                    localStorage.setItem(test, test);
+                    localStorage.removeItem(test);
+                    return true;
+                } catch (e) {
+                    return false;
+                }
+            }
+            
+            getCachedMessages(dialogueId) {
+                if (!this.isAvailable) {
+                    return null;
+                }
+                
+                try {
+                    const key = this.cachePrefix + dialogueId;
+                    const cached = localStorage.getItem(key);
+                    
+                    if (!cached) {
+                        return null;
+                    }
+                    
+                    const data = JSON.parse(cached);
+                    
+                    const lastUpdated = new Date(data.lastUpdated);
+                    const now = new Date();
+                    const age = now - lastUpdated;
+                    
+                    if (age > this.ttl) {
+                        console.log(`[MessageCache] Кэш для диалога ${dialogueId} устарел, удаляем`);
+                        localStorage.removeItem(key);
+                        return null;
+                    }
+                    
+                    console.log(`[MessageCache] Загружено ${data.messages.length} сообщений из кэша для диалога ${dialogueId}`);
+                    return data.messages;
+                    
+                } catch (error) {
+                    console.error('[MessageCache] Ошибка чтения кэша:', error);
+                    return null;
+                }
+            }
+            
+            cacheMessages(dialogueId, messages) {
+                if (!this.isAvailable) {
+                    return;
+                }
+                
+                try {
+                    const key = this.cachePrefix + dialogueId;
+                    const data = {
+                        dialogueId: dialogueId,
+                        messages: messages,
+                        lastUpdated: new Date().toISOString(),
+                        version: 1
+                    };
+                    
+                    localStorage.setItem(key, JSON.stringify(data));
+                    console.log(`[MessageCache] Сохранено ${messages.length} сообщений в кэш для диалога ${dialogueId}`);
+                    
+                    this.checkCacheSize();
+                    
+                } catch (error) {
+                    if (error.name === 'QuotaExceededError') {
+                        console.warn('[MessageCache] Превышена квота localStorage, очищаем кэш');
+                        this.cleanExpiredCache();
+                        
+                        try {
+                            localStorage.setItem(key, JSON.stringify(data));
+                            console.log(`[MessageCache] Повторное сохранение успешно после очистки`);
+                        } catch (e2) {
+                            console.error('[MessageCache] Не удалось сохранить после очистки:', e2);
+                        }
+                    } else {
+                        console.error('[MessageCache] Ошибка сохранения в кэш:', error);
+                    }
+                }
+            }
+            
+            addMessage(dialogueId, message) {
+                if (!this.isAvailable) {
+                    return;
+                }
+                
+                try {
+                    const cached = this.getCachedMessages(dialogueId);
+                    let messages = cached || [];
+                    
+                    messages.push(message);
+                    
+                    this.trimCache(dialogueId, messages);
+                    
+                    this.cacheMessages(dialogueId, messages);
+                    
+                } catch (error) {
+                    console.error('[MessageCache] Ошибка добавления сообщения:', error);
+                }
+            }
+            
+            trimCache(dialogueId, messages) {
+                if (messages.length > this.maxMessagesPerDialogue) {
+                    const removed = messages.length - this.maxMessagesPerDialogue;
+                    messages.splice(0, removed);
+                    console.log(`[MessageCache] Удалено ${removed} старых сообщений из кэша диалога ${dialogueId}`);
+                }
+            }
+            
+            cleanExpiredCache() {
+                if (!this.isAvailable) {
+                    return;
+                }
+                
+                try {
+                    const now = new Date();
+                    let cleanedCount = 0;
+                    
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        
+                        if (key && key.startsWith(this.cachePrefix)) {
+                            try {
+                                const cached = localStorage.getItem(key);
+                                if (cached) {
+                                    const data = JSON.parse(cached);
+                                    const lastUpdated = new Date(data.lastUpdated);
+                                    const age = now - lastUpdated;
+                                    
+                                    if (age > this.ttl) {
+                                        localStorage.removeItem(key);
+                                        cleanedCount++;
+                                    }
+                                }
+                            } catch (error) {
+                                console.warn(`[MessageCache] Удаление поврежденной записи: ${key}`);
+                                localStorage.removeItem(key);
+                                cleanedCount++;
+                            }
+                        }
+                    }
+                    
+                    if (cleanedCount > 0) {
+                        console.log(`[MessageCache] Очищено ${cleanedCount} устаревших записей кэша`);
+                    }
+                    
+                } catch (error) {
+                    console.error('[MessageCache] Ошибка очистки устаревшего кэша:', error);
+                }
+            }
+            
+            checkCacheSize() {
+                if (!this.isAvailable) {
+                    return;
+                }
+                
+                try {
+                    let totalSize = 0;
+                    const cacheEntries = [];
+                    
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        
+                        if (key && key.startsWith(this.cachePrefix)) {
+                            const value = localStorage.getItem(key);
+                            if (value) {
+                                const size = new Blob([value]).size;
+                                totalSize += size;
+                                
+                                try {
+                                    const data = JSON.parse(value);
+                                    cacheEntries.push({
+                                        key: key,
+                                        size: size,
+                                        lastUpdated: new Date(data.lastUpdated)
+                                    });
+                                } catch (e) {
+                                    // Игнорируем поврежденные записи
+                                }
+                            }
+                        }
+                    }
+                    
+                    console.log(`[MessageCache] Общий размер кэша: ${(totalSize / 1024 / 1024).toFixed(2)} MB`);
+                    
+                    if (totalSize > this.maxCacheSize) {
+                        console.warn(`[MessageCache] Превышен лимит размера кэша (${(totalSize / 1024 / 1024).toFixed(2)} MB), начинаем очистку`);
+                        
+                        cacheEntries.sort((a, b) => a.lastUpdated - b.lastUpdated);
+                        
+                        const targetSize = 4 * 1024 * 1024; // 4MB
+                        let currentSize = totalSize;
+                        let removedCount = 0;
+                        
+                        for (const entry of cacheEntries) {
+                            if (currentSize <= targetSize) {
+                                break;
+                            }
+                            
+                            localStorage.removeItem(entry.key);
+                            currentSize -= entry.size;
+                            removedCount++;
+                        }
+                        
+                        console.log(`[MessageCache] Удалено ${removedCount} записей, новый размер: ${(currentSize / 1024 / 1024).toFixed(2)} MB`);
+                    }
+                    
+                } catch (error) {
+                    console.error('[MessageCache] Ошибка проверки размера кэша:', error);
+                }
+            }
+        }
+        
+        // Перехват console.log для отображения в UI
+        const output = document.getElementById('output');
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        const originalError = console.error;
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            output.textContent += args.join(' ') + '\n';
+        };
+        
+        console.warn = function(...args) {
+            originalWarn.apply(console, args);
+            output.textContent += '[WARN] ' + args.join(' ') + '\n';
+        };
+        
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            output.textContent += '[ERROR] ' + args.join(' ') + '\n';
+        };
+        
+        // Тестовые функции
+        function testLocalStorageAvailability() {
+            const cache = new MessageCache();
+            const result = document.getElementById('test1-result');
+            
+            if (cache.isAvailable) {
+                result.innerHTML = '<span class="success">✓ localStorage доступен</span>';
+            } else {
+                result.innerHTML = '<span class="error">✗ localStorage недоступен</span>';
+            }
+        }
+        
+        function testCacheMessages() {
+            const cache = new MessageCache();
+            const result = document.getElementById('test2-result');
+            
+            const testMessages = [
+                { id: 1, role: 'user', content: 'Привет', timestamp: new Date().toISOString() },
+                { id: 2, role: 'assistant', content: 'Здравствуйте!', timestamp: new Date().toISOString() }
+            ];
+            
+            cache.cacheMessages(999, testMessages);
+            const loaded = cache.getCachedMessages(999);
+            
+            if (loaded && loaded.length === 2) {
+                result.innerHTML = '<span class="success">✓ Сообщения сохранены и загружены успешно</span>';
+            } else {
+                result.innerHTML = '<span class="error">✗ Ошибка сохранения/загрузки</span>';
+            }
+        }
+        
+        function testAddMessage() {
+            const cache = new MessageCache();
+            const result = document.getElementById('test3-result');
+            
+            cache.cacheMessages(998, []);
+            cache.addMessage(998, { id: 1, role: 'user', content: 'Тест', timestamp: new Date().toISOString() });
+            
+            const loaded = cache.getCachedMessages(998);
+            
+            if (loaded && loaded.length === 1) {
+                result.innerHTML = '<span class="success">✓ Сообщение добавлено успешно</span>';
+            } else {
+                result.innerHTML = '<span class="error">✗ Ошибка добавления сообщения</span>';
+            }
+        }
+        
+        function testTrimCache() {
+            const cache = new MessageCache();
+            const result = document.getElementById('test4-result');
+            
+            // Создаем 150 сообщений
+            const messages = [];
+            for (let i = 0; i < 150; i++) {
+                messages.push({ id: i, role: 'user', content: `Сообщение ${i}`, timestamp: new Date().toISOString() });
+            }
+            
+            cache.cacheMessages(997, messages);
+            const loaded = cache.getCachedMessages(997);
+            
+            if (loaded && loaded.length === 100) {
+                result.innerHTML = '<span class="success">✓ Кэш обрезан до 100 сообщений (было 150)</span>';
+            } else {
+                result.innerHTML = `<span class="error">✗ Ошибка обрезки кэша (получено ${loaded ? loaded.length : 0} сообщений)</span>`;
+            }
+        }
+        
+        function testCleanExpiredCache() {
+            const cache = new MessageCache();
+            const result = document.getElementById('test5-result');
+            
+            // Создаем устаревший кэш (25 часов назад)
+            const oldDate = new Date();
+            oldDate.setHours(oldDate.getHours() - 25);
+            
+            const key = cache.cachePrefix + '996';
+            const data = {
+                dialogueId: 996,
+                messages: [{ id: 1, role: 'user', content: 'Старое сообщение' }],
+                lastUpdated: oldDate.toISOString(),
+                version: 1
+            };
+            
+            localStorage.setItem(key, JSON.stringify(data));
+            
+            cache.cleanExpiredCache();
+            
+            const loaded = cache.getCachedMessages(996);
+            
+            if (!loaded) {
+                result.innerHTML = '<span class="success">✓ Устаревший кэш удален</span>';
+            } else {
+                result.innerHTML = '<span class="error">✗ Устаревший кэш не удален</span>';
+            }
+        }
+        
+        function testCheckCacheSize() {
+            const cache = new MessageCache();
+            const result = document.getElementById('test4-result');
+            
+            result.innerHTML = '<span>Проверка размера кэша... (см. консоль)</span>';
+            cache.checkCacheSize();
+        }
+        
+        function testQuotaExceeded() {
+            const result = document.getElementById('test7-result');
+            result.innerHTML = '<span>Этот тест требует ручной проверки. Попробуйте заполнить localStorage до предела и проверьте обработку ошибки в консоли.</span>';
+        }
+        
+        function clearTestData() {
+            const keys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('msg_cache_')) {
+                    keys.push(key);
+                }
+            }
+            
+            keys.forEach(key => localStorage.removeItem(key));
+            
+            alert(`Удалено ${keys.length} тестовых записей`);
+            output.textContent = '';
+        }
+    </script>
+</body>
+</html>

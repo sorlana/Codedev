@@ -70,6 +70,7 @@ public class PromptProcessorIntegrationTests
         var tasksFilePathResolverLogger = loggerFactory.CreateLogger<TasksFilePathResolver>();
         var commandRecognizer = new CommandRecognizer();
         var tasksFilePathResolver = new TasksFilePathResolver(pathValidator, tasksFilePathResolverLogger);
+        var mockProjectService = new MockProjectManagementService();
 
         // Act - Create PromptProcessor with factory-created service
         var promptProcessor = new PromptProcessor(
@@ -79,6 +80,7 @@ public class PromptProcessorIntegrationTests
             directShellService,
             gitService,
             taskExecutorService,
+            mockProjectService,
             promptProcessorLogger,
             commandRecognizer,
             tasksFilePathResolver
@@ -218,6 +220,7 @@ public class PromptProcessorIntegrationTests
         var tasksFilePathResolverLogger1 = loggerFactory.CreateLogger<TasksFilePathResolver>();
         var commandRecognizer1 = new CommandRecognizer();
         var tasksFilePathResolver1 = new TasksFilePathResolver(pathValidator1, tasksFilePathResolverLogger1);
+        var mockProjectService1 = new MockProjectManagementService();
         
         var promptProcessor1 = new PromptProcessor(
             dbContext1,
@@ -226,6 +229,7 @@ public class PromptProcessorIntegrationTests
             new MockDirectShellService(),
             new MockGitService(),
             new Lazy<ITaskExecutorService>(() => new MockTaskExecutorService()),
+            mockProjectService1,
             promptProcessorLogger,
             commandRecognizer1,
             tasksFilePathResolver1
@@ -262,6 +266,7 @@ public class PromptProcessorIntegrationTests
         var tasksFilePathResolverLogger2 = loggerFactory.CreateLogger<TasksFilePathResolver>();
         var commandRecognizer2 = new CommandRecognizer();
         var tasksFilePathResolver2 = new TasksFilePathResolver(pathValidator2, tasksFilePathResolverLogger2);
+        var mockProjectService2 = new MockProjectManagementService();
         
         var promptProcessor2 = new PromptProcessor(
             dbContext2,
@@ -270,6 +275,7 @@ public class PromptProcessorIntegrationTests
             new MockDirectShellService(),
             new MockGitService(),
             new Lazy<ITaskExecutorService>(() => new MockTaskExecutorService()),
+            mockProjectService2,
             promptProcessorLogger,
             commandRecognizer2,
             tasksFilePathResolver2
@@ -498,4 +504,17 @@ public class MockTaskExecutorService : ITaskExecutorService
             CompletedAt = null
         });
     }
+}
+
+
+/// <summary>
+/// Mock для IProjectManagementService
+/// </summary>
+class MockProjectManagementService : IProjectManagementService
+{
+    public Task<List<Project>> GetAllProjectsAsync() => Task.FromResult(new List<Project>());
+    public Task<Project?> GetSelectedProjectAsync() => Task.FromResult<Project?>(null);
+    public Task<Project> AddProjectAsync(string projectPath) => throw new NotImplementedException();
+    public Task DeleteProjectAsync(int projectId) => throw new NotImplementedException();
+    public Task SelectProjectAsync(int projectId) => throw new NotImplementedException();
 }

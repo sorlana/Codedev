@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Простой тест</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+        }
+        .success { color: #4ec9b0; }
+        .error { color: #f48771; }
+    </style>
+</head>
+<body>
+    <h1>Диагностика JavaScript</h1>
+    
+    <button id="testButton">Тест 1: Простая кнопка</button>
+    <button id="testAppJs">Тест 2: Проверка app.js</button>
+    <button id="testClasses">Тест 3: Проверка классов</button>
+    
+    <div id="output"></div>
+    
+    <script src="app.js"></script>
+    <script>
+        const output = document.getElementById('output');
+        
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            output.appendChild(div);
+        }
+        
+        // Тест 1: Простая кнопка
+        document.getElementById('testButton').addEventListener('click', () => {
+            log('✓ Простая кнопка работает!', 'success');
+        });
+        
+        // Тест 2: Проверка загрузки app.js
+        document.getElementById('testAppJs').addEventListener('click', () => {
+            if (typeof WebSocketClient !== 'undefined') {
+                log('✓ app.js загружен, WebSocketClient найден', 'success');
+            } else {
+                log('✗ app.js не загружен или WebSocketClient не определен', 'error');
+            }
+            
+            if (typeof MessageCache !== 'undefined') {
+                log('✓ MessageCache найден', 'success');
+            } else {
+                log('✗ MessageCache не определен', 'error');
+            }
+            
+            if (typeof DraftManager !== 'undefined') {
+                log('✓ DraftManager найден', 'success');
+            } else {
+                log('✗ DraftManager не определен', 'error');
+            }
+            
+            if (typeof VirtualList !== 'undefined') {
+                log('✓ VirtualList найден', 'success');
+            } else {
+                log('✗ VirtualList не определен', 'error');
+            }
+        });
+        
+        // Тест 3: Создание экземпляров классов
+        document.getElementById('testClasses').addEventListener('click', () => {
+            try {
+                const cache = new MessageCache();
+                log('✓ MessageCache создан успешно', 'success');
+                
+                const draft = new DraftManager();
+                log('✓ DraftManager создан успешно', 'success');
+                
+                log('✓ Все классы работают!', 'success');
+            } catch (error) {
+                log(`✗ Ошибка создания классов: ${error.message}`, 'error');
+            }
+        });
+        
+        // Автоматическая проверка при загрузке
+        window.addEventListener('DOMContentLoaded', () => {
+            log('Страница загружена', 'success');
+            log('Проверка доступности классов...');
+            
+            const classes = ['WebSocketClient', 'MessageCache', 'VirtualList', 'DraftManager'];
+            classes.forEach(className => {
+                if (typeof window[className] !== 'undefined') {
+                    log(`✓ ${className} доступен`, 'success');
+                } else {
+                    log(`✗ ${className} НЕ доступен`, 'error');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

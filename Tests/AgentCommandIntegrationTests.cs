@@ -302,6 +302,8 @@ public static class AgentCommandIntegrationTests
         var promptProcessorLogger = loggerFactory.CreateLogger<PromptProcessor>();
         
         var taskExecutorService = new Lazy<ITaskExecutorService>(() => new MockTaskExecutorService());
+        
+        var mockProjectService = new MockProjectManagementService();
 
         var promptProcessor = new PromptProcessor(
             dbContext,
@@ -310,11 +312,22 @@ public static class AgentCommandIntegrationTests
             new MockDirectShellService(),
             new MockGitService(),
             taskExecutorService,
+            mockProjectService,
             promptProcessorLogger,
             commandRecognizer,
             tasksFilePathResolver
         );
 
         return (promptProcessor, dbContext);
+    }
+    
+    // Mock для IProjectManagementService
+    private class MockProjectManagementService : IProjectManagementService
+    {
+        public Task<List<Project>> GetAllProjectsAsync() => Task.FromResult(new List<Project>());
+        public Task<Project?> GetSelectedProjectAsync() => Task.FromResult<Project?>(null);
+        public Task<Project> AddProjectAsync(string projectPath) => throw new NotImplementedException();
+        public Task DeleteProjectAsync(int projectId) => throw new NotImplementedException();
+        public Task SelectProjectAsync(int projectId) => throw new NotImplementedException();
     }
 }

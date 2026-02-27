@@ -74,6 +74,18 @@ if (args.Length > 0 && args[0] == "test-agentcommands")
     return;
 }
 
+if (args.Length > 0 && args[0] == "test-websocket")
+{
+    await WebSocketInfrastructureTests.Main(args);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "test-websocket-integration")
+{
+    await WebSocketIntegrationTests.Main(args);
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Настройка JSON сериализации для обработки циклических ссылок
@@ -113,6 +125,10 @@ builder.Services.AddScoped<Lazy<ITaskExecutorService>>(sp =>
 builder.Services.AddSingleton<CommandRecognizer>();
 builder.Services.AddScoped<TasksFilePathResolver>();
 
+// Регистрация WebSocket компонентов
+builder.Services.AddSingleton<IWebSocketManager, CSharpRefactoringAssistant.Services.WebSocketManager>();
+builder.Services.AddScoped<IStreamingService, StreamingService>();
+
 // Add CORS
 builder.Services.AddCors(options =>
 {
@@ -125,6 +141,9 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Enable WebSockets
+app.UseWebSockets();
 
 // Enable static files - must be in this order
 app.UseDefaultFiles();
@@ -192,11 +211,28 @@ app.MapPost("/api/dialogues", async (
     return Results.Ok(dialogue);
 });
 
-app.MapGet("/api/dialogues", async (RefactoringDbContext dbContext) =>
+app.MapGet("/api/dialogues", async (
+    RefactoringDbContext dbContext,
+    IProjectManagementService projectService) =>
 {
+    // Получаем выбранный проект
+    var selectedProject = await projectService.GetSelectedProjectAsync();
+    
+    if (selectedProject == null)
+    {
+        // Если нет выбранного проекта, возвращаем все диалоги
+        var allDialogues = await dbContext.Dialogues
+            .OrderByDescending(d => d.CreatedAt)
+            .ToListAsync();
+        return Results.Ok(allDialogues);
+    }
+    
+    // Возвращаем только диалоги выбранного проекта
     var dialogues = await dbContext.Dialogues
+        .Where(d => d.ProjectPath == selectedProject.Path)
         .OrderByDescending(d => d.CreatedAt)
         .ToListAsync();
+    
     return Results.Ok(dialogues);
 });
 
@@ -651,9 +687,12 @@ app.MapPost("/api/configuration/test", async (
 });
 
 // Project management endpoints
-app.MapGet("/api/projects", async (IProjectManagementService projectService) =>
+app.MapGet("/api/projects", async (IProjectManagementService projectService, ILogger<Program> logger) =>
 {
     var projects = await projectService.GetAllProjectsAsync();
+    logger.LogInformation("GET /api/projects: возвращено {Count} проектов. Выбранный: {Selected}", 
+        projects.Count, 
+        projects.FirstOrDefault(p => p.IsSelected)?.Name ?? "нет");
     return Results.Ok(projects);
 });
 
@@ -699,15 +738,18 @@ app.MapDelete("/api/projects/{id}", async (
 
 app.MapPost("/api/projects/{id}/select", async (
     int id,
-    IProjectManagementService projectService) =>
+    IProjectManagementService projectService,
+    ILogger<Program> logger) =>
 {
     try
     {
         await projectService.SelectProjectAsync(id);
+        logger.LogInformation("POST /api/projects/{Id}/select: проект успешно выбран", id);
         return Results.Ok(new { message = "Проект выбран" });
     }
     catch (ArgumentException ex)
     {
+        logger.LogWarning("POST /api/projects/{Id}/select: проект не найден", id);
         return Results.NotFound(new { message = ex.Message });
     }
 });
@@ -800,5 +842,278 @@ app.MapGet("/api/dialogues/{id}/execution-status", async (
 
 // Remove the root endpoint - let static files handle it
 // app.MapGet("/", () => "C# Refactoring Assistant API");
+
+// WebSocket endpoint
+app.Map("/ws", async (HttpContext context) =>
+{
+    app.Logger.LogInformation("WebSocket запрос получен: Path={Path}, Query={Query}", 
+        context.Request.Path, context.Request.QueryString);
+    
+    // Проверка, что это WebSocket запрос
+    if (!context.WebSockets.IsWebSocketRequest)
+    {
+        app.Logger.LogWarning("Получен не-WebSocket запрос на /ws endpoint");
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsync("WebSocket connection expected");
+        return;
+    }
+
+    // Извлечение dialogueId из query string
+    if (!context.Request.Query.TryGetValue("dialogueId", out var dialogueIdStr) ||
+        !int.TryParse(dialogueIdStr, out var dialogueId))
+    {
+        app.Logger.LogWarning("Отсутствует или неверный dialogueId в query string: {QueryString}", 
+            context.Request.QueryString);
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsync("dialogueId query parameter is required");
+        return;
+    }
+
+    app.Logger.LogInformation("Проверка существования диалога: DialogueId={DialogueId}", dialogueId);
+
+    // Проверка существования диалога
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<RefactoringDbContext>();
+    var dialogue = await dbContext.Dialogues.FindAsync(dialogueId);
+    
+    if (dialogue == null)
+    {
+        app.Logger.LogWarning("Диалог не найден: DialogueId={DialogueId}", dialogueId);
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        await context.Response.WriteAsync($"Dialogue {dialogueId} not found");
+        return;
+    }
+
+    app.Logger.LogInformation("Диалог найден, принятие WebSocket соединения: DialogueId={DialogueId}", dialogueId);
+
+    // Принятие WebSocket соединения
+    var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+    var connectionId = Guid.NewGuid().ToString();
+    
+    app.Logger.LogInformation("WebSocket соединение установлено: ConnectionId={ConnectionId}, DialogueId={DialogueId}, Timestamp={Timestamp}", 
+        connectionId, dialogueId, DateTime.UtcNow);
+
+    // Получаем сервисы из scope
+    var webSocketManager = scope.ServiceProvider.GetRequiredService<IWebSocketManager>();
+    var streamingService = scope.ServiceProvider.GetRequiredService<IStreamingService>();
+
+    try
+    {
+        // Регистрируем соединение в WebSocketManager (отправит connection_ack автоматически)
+        await webSocketManager.RegisterConnectionAsync(connectionId, webSocket, dialogueId);
+
+        // Буфер для получения сообщений
+        var buffer = new byte[1024 * 4];
+
+        // Обработка входящих сообщений
+        while (webSocket.State == System.Net.WebSockets.WebSocketState.Open)
+        {
+            var result = await webSocket.ReceiveAsync(
+                new ArraySegment<byte>(buffer),
+                CancellationToken.None);
+
+            if (result.MessageType == System.Net.WebSockets.WebSocketMessageType.Close)
+            {
+                app.Logger.LogInformation("WebSocket закрытие запрошено клиентом: ConnectionId={ConnectionId}", connectionId);
+                await webSocket.CloseAsync(
+                    System.Net.WebSockets.WebSocketCloseStatus.NormalClosure,
+                    "Connection closed by client",
+                    CancellationToken.None);
+                break;
+            }
+
+            if (result.MessageType == System.Net.WebSockets.WebSocketMessageType.Text)
+            {
+                var messageJson = System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count);
+                app.Logger.LogInformation("Получено WebSocket сообщение: {Message}", messageJson);
+
+                try
+                {
+                    // Настройка десериализации для camelCase (frontend отправляет type, payload)
+                    var options = new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    };
+                    
+                    var message = JsonSerializer.Deserialize<WebSocketMessage>(messageJson, options);
+                    
+                    if (message == null)
+                    {
+                        app.Logger.LogWarning("Не удалось десериализовать WebSocket сообщение");
+                        continue;
+                    }
+
+                    app.Logger.LogInformation("Десериализованное сообщение - Type: {Type}, Payload: {Payload}", 
+                        message.Type, message.Payload?.ToString() ?? "null");
+
+                    // Обработка различных типов сообщений
+                    switch (message.Type)
+                    {
+                        case WebSocketMessageTypes.Ping:
+                            // Ответ на ping
+                            await webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                            {
+                                Type = WebSocketMessageTypes.Pong,
+                                Payload = new { connectionId }
+                            });
+                            break;
+
+                        case WebSocketMessageTypes.UserMessage:
+                            // Обработка сообщения пользователя через StreamingService
+                            app.Logger.LogInformation("Получено сообщение пользователя: DialogueId={DialogueId}, ConnectionId={ConnectionId}", 
+                                dialogueId, connectionId);
+                            
+                            try
+                            {
+                                // Извлекаем содержимое сообщения из payload
+                                var payloadElement = (JsonElement)message.Payload!;
+                                var content = payloadElement.GetProperty("content").GetString();
+                                
+                                if (string.IsNullOrWhiteSpace(content))
+                                {
+                                    app.Logger.LogWarning("Получено пустое сообщение пользователя");
+                                    await webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                                    {
+                                        Type = WebSocketMessageTypes.Error,
+                                        Payload = new ErrorPayload
+                                        {
+                                            DialogueId = dialogueId,
+                                            Message = "Содержимое сообщения не может быть пустым"
+                                        }
+                                    });
+                                    break;
+                                }
+                                
+                                // Запускаем обработку в фоновом режиме
+                                _ = Task.Run(async () =>
+                                {
+                                    try
+                                    {
+                                        await streamingService.ProcessPromptWithStreamingAsync(
+                                            dialogueId,
+                                            content,
+                                            connectionId,
+                                            CancellationToken.None);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        app.Logger.LogError(ex, "Ошибка при обработке сообщения пользователя");
+                                    }
+                                });
+                            }
+                            catch (Exception ex)
+                            {
+                                app.Logger.LogError(ex, "Ошибка при извлечении содержимого сообщения");
+                                await webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                                {
+                                    Type = WebSocketMessageTypes.Error,
+                                    Payload = new ErrorPayload
+                                    {
+                                        DialogueId = dialogueId,
+                                        Message = "Неверный формат сообщения"
+                                    }
+                                });
+                            }
+                            break;
+
+                        case WebSocketMessageTypes.CancelGeneration:
+                            // Обработка отмены генерации
+                            app.Logger.LogInformation("Получен запрос на отмену генерации: DialogueId={DialogueId}, ConnectionId={ConnectionId}", 
+                                dialogueId, connectionId);
+                            
+                            await streamingService.CancelGenerationAsync(connectionId);
+                            break;
+
+                        default:
+                            app.Logger.LogWarning("Неизвестный тип сообщения: {Type}", message.Type);
+                            break;
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    app.Logger.LogError(ex, "Ошибка парсинга WebSocket сообщения");
+                    
+                    // Отправка сообщения об ошибке
+                    await webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                    {
+                        Type = WebSocketMessageTypes.Error,
+                        Payload = new ErrorPayload
+                        {
+                            Message = "Неверный формат сообщения",
+                            DialogueId = dialogueId
+                        }
+                    });
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Ошибка в WebSocket соединении: ConnectionId={ConnectionId}", connectionId);
+    }
+    finally
+    {
+        app.Logger.LogInformation("WebSocket соединение закрыто: ConnectionId={ConnectionId}, Timestamp={Timestamp}", 
+            connectionId, DateTime.UtcNow);
+        
+        // Удаляем соединение из WebSocketManager
+        await webSocketManager.UnregisterConnectionAsync(connectionId);
+        
+        // Закрываем WebSocket, если он еще открыт
+        if (webSocket.State == System.Net.WebSockets.WebSocketState.Open ||
+            webSocket.State == System.Net.WebSockets.WebSocketState.CloseReceived)
+        {
+            try
+            {
+                await webSocket.CloseAsync(
+                    System.Net.WebSockets.WebSocketCloseStatus.NormalClosure,
+                    "Connection closed",
+                    CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                app.Logger.LogError(ex, "Ошибка при закрытии WebSocket: ConnectionId={ConnectionId}", connectionId);
+            }
+        }
+        
+        webSocket.Dispose();
+    }
+});
+
+// Ollama management endpoint
+app.MapPost("/api/ollama/start", async (IConfiguration configuration) =>
+{
+    try
+    {
+        var ollamaConfig = configuration.GetSection("Llm:Ollama");
+        var model = ollamaConfig["Model"] ?? "llama3.1:8b";
+        
+        app.Logger.LogInformation("Attempting to start Ollama model: {Model}", model);
+        
+        // Запускаем команду ollama run в фоновом режиме
+        var processStartInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/c start /min ollama run {model}",
+            UseShellExecute = true,
+            CreateNoWindow = false,
+            WindowStyle = System.Diagnostics.ProcessWindowStyle.Minimized
+        };
+        
+        System.Diagnostics.Process.Start(processStartInfo);
+        
+        app.Logger.LogInformation("Ollama model start command executed");
+        
+        // Даем модели время на запуск
+        await Task.Delay(3000);
+        
+        return Results.Ok(new { message = $"Модель {model} запускается..." });
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Error starting Ollama model");
+        return Results.Problem($"Ошибка запуска модели: {ex.Message}");
+    }
+});
 
 app.Run();

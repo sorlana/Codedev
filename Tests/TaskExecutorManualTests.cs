@@ -212,6 +212,16 @@ public class TaskExecutorManualTests
         {
             return Task.FromResult("Mock response");
         }
+        
+        public List<CSharpRefactoringAssistant.Models.FunctionDefinition> GetAvailableTools()
+        {
+            return new List<CSharpRefactoringAssistant.Models.FunctionDefinition>();
+        }
+        
+        public Task<string> ExecuteFunctionAsync(string functionName, Dictionary<string, object> arguments, string projectPath)
+        {
+            return Task.FromResult("Mock function result");
+        }
     }
 
     private class MockGitService : IGitService

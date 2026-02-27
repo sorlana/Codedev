@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест WebSocket Streaming</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .log {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #007bff;
+        }
+        .log-entry.error {
+            border-left-color: #dc3545;
+            background: #fff5f5;
+        }
+        .log-entry.success {
+            border-left-color: #28a745;
+            background: #f5fff5;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        #message-display {
+            background: white;
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            min-height: 100px;
+            white-space: pre-wrap;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <h1>Тест WebSocket Streaming</h1>
+    
+    <div id="status" class="status disconnected">
+        Статус: Отключено
+    </div>
+    
+    <div>
+        <label>Dialogue ID: <input type="number" id="dialogueId" value="1"></label>
+        <button onclick="connect()">Подключиться</button>
+        <button onclick="disconnect()">Отключиться</button>
+    </div>
+    
+    <div>
+        <label>Сообщение: <input type="text" id="messageInput" value="Привет!" style="width: 300px;"></label>
+        <button onclick="sendMessage()">Отправить</button>
+    </div>
+    
+    <h3>Полученное сообщение:</h3>
+    <div id="message-display"></div>
+    
+    <h3>Лог событий:</h3>
+    <div id="log" class="log"></div>
+    
+    <script>
+        let ws = null;
+        let messageContent = '';
+        
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            if (connected) {
+                statusDiv.className = 'status connected';
+                statusDiv.textContent = 'Статус: Подключено';
+            } else {
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = 'Статус: Отключено';
+            }
+        }
+        
+        function connect() {
+            const dialogueId = document.getElementById('dialogueId').value;
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                log('WebSocket уже подключен', 'error');
+                return;
+            }
+            
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            const wsUrl = `${protocol}//${host}/ws?dialogueId=${dialogueId}`;
+            
+            log(`Подключение к ${wsUrl}...`);
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = (event) => {
+                log('WebSocket подключен!', 'success');
+                updateStatus(true);
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    log(`Получено: ${message.type}`, 'success');
+                    
+                    switch (message.type) {
+                        case 'connection_ack':
+                            log(`ConnectionId: ${message.payload.connectionId}`, 'success');
+                            break;
+                            
+                        case 'assistant_message_start':
+                            log('Начало генерации ответа', 'success');
+                            messageContent = '';
+                            document.getElementById('message-display').textContent = '';
+                            break;
+                            
+                        case 'assistant_message_chunk':
+                            messageContent += message.payload.content;
+                            document.getElementById('message-display').textContent = messageContent;
+                            log(`Фрагмент: "${message.payload.content}"`, 'success');
+                            break;
+                            
+                        case 'assistant_message_end':
+                            log('Генерация завершена', 'success');
+                            log(`Полное сообщение (${messageContent.length} символов)`, 'success');
+                            break;
+                            
+                        case 'error':
+                            log(`Ошибка: ${message.payload.message}`, 'error');
+                            break;
+                            
+                        default:
+                            log(`Неизвестный тип: ${message.type}`);
+                    }
+                } catch (error) {
+                    log(`Ошибка парсинга: ${error.message}`, 'error');
+                }
+            };
+            
+            ws.onerror = (error) => {
+                log('Ошибка WebSocket', 'error');
+                console.error(error);
+            };
+            
+            ws.onclose = (event) => {
+                log(`WebSocket закрыт: код ${event.code}, причина: ${event.reason || 'нет'}`);
+                updateStatus(false);
+            };
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+                log('Отключение...');
+            }
+        }
+        
+        function sendMessage() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('WebSocket не подключен!', 'error');
+                return;
+            }
+            
+            const content = document.getElementById('messageInput').value;
+            const dialogueId = parseInt(document.getElementById('dialogueId').value);
+            
+            const message = {
+                type: 'user_message',
+                payload: {
+                    dialogueId: dialogueId,
+                    content: content
+                },
+                timestamp: new Date().toISOString()
+            };
+            
+            log(`Отправка сообщения: "${content}"`);
+            ws.send(JSON.stringify(message));
+        }
+        
+        // Автоподключение при загрузке
+        window.addEventListener('load', () => {
+            log('Страница загружена');
+        });
+    </script>
+</body>
+</html>
