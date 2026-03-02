@@ -316,7 +316,9 @@ public static class AgentCommandIntegrationTests
             mockProjectService,
             promptProcessorLogger,
             commandRecognizer,
-            tasksFilePathResolver
+            tasksFilePathResolver,
+            new MockDeepSeekOrchestrator(),
+            new MockConfigurationService()
         );
 
         return (promptProcessor, dbContext);

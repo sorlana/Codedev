@@ -18,6 +18,8 @@ public class PromptProcessor : IPromptProcessor
     private readonly ILogger<PromptProcessor> _logger;
     private readonly CommandRecognizer _commandRecognizer;
     private readonly TasksFilePathResolver _tasksFilePathResolver;
+    private readonly IDeepSeekOrchestratorService _orchestrator;
+    private readonly IConfigurationService _configService;
 
     public PromptProcessor(
         RefactoringDbContext dbContext,
@@ -29,7 +31,9 @@ public class PromptProcessor : IPromptProcessor
         IProjectManagementService projectService,
         ILogger<PromptProcessor> logger,
         CommandRecognizer commandRecognizer,
-        TasksFilePathResolver tasksFilePathResolver)
+        TasksFilePathResolver tasksFilePathResolver,
+        IDeepSeekOrchestratorService orchestrator,
+        IConfigurationService configService)
     {
         _dbContext = dbContext;
         _llmService = llmService;
@@ -41,6 +45,8 @@ public class PromptProcessor : IPromptProcessor
         _logger = logger;
         _commandRecognizer = commandRecognizer;
         _tasksFilePathResolver = tasksFilePathResolver;
+        _orchestrator = orchestrator;
+        _configService = configService;
     }
 
     public async Task<string> ProcessPromptAsync(int dialogueId, string prompt)
@@ -109,27 +115,71 @@ public class PromptProcessor : IPromptProcessor
 
         try
         {
-            // 3. Get Serena tool definitions
-            var toolDefinitions = GetSerenaToolDefinitions();
+            // 3. Определяем тип проекта и получаем соответствующие инструменты
+            if (string.IsNullOrEmpty(projectPath))
+            {
+                projectPath = Directory.GetCurrentDirectory();
+                _logger.LogWarning("ProjectPath was empty, using current directory: {ProjectPath}", projectPath);
+            }
+            
+            var isCSharpProject = Directory.GetFiles(projectPath, "*.csproj", SearchOption.TopDirectoryOnly).Any();
+            var toolDefinitions = GetSerenaToolDefinitions(isCSharpProject);
+            
+            _logger.LogInformation("Project path: {ProjectPath}", projectPath);
+            _logger.LogInformation("Project type: {ProjectType}, Tools count: {ToolsCount}", 
+                isCSharpProject ? "C#" : "Non-C#", 
+                toolDefinitions.Count);
+            _logger.LogInformation("Available tools: {Tools}", 
+                string.Join(", ", toolDefinitions.Select(t => t.Name)));
 
             // 4. Prepare system message with clear instructions
-            var systemMessageContent = @"You are a helpful AI assistant for C# project refactoring on Windows.
+            var systemMessageContent = @"Ты - AI-ассистент для работы с кодом и файлами на Windows.
 
-CRITICAL: You MUST call the appropriate tools to perform actions. Never just describe what to do.
+КРИТИЧЕСКИ ВАЖНО: 
+- Отвечай ТОЛЬКО на русском языке
+- Вызывай инструменты ТОЛЬКО когда пользователь явно просит выполнить действие с кодом или файлами
+- Для обычного общения (приветствия, вопросы, обсуждения) - просто отвечай текстом БЕЗ вызова инструментов
 
-When the user asks you to do something:
-1. Call the tool immediately
-2. You can add explanation text along with the tool call
+ВАЖНО ПРО activate_project:
+- activate_project нужен ТОЛЬКО для C# проектов (с .csproj файлами)
+- Для HTML/JS/CSS/JSON проектов НЕ вызывай activate_project - он выдаст ошибку
+- Если видишь ошибку 'Error activating project' - ИГНОРИРУЙ её и продолжай работу БЕЗ activate_project
+- Для не-C# проектов используй только: read_file, write_file, create_file, execute_shell_command
 
-Available tools:
-- execute_shell_command: Execute Windows commands
-- read_file: Read file contents
-- find_symbol: Find C# symbols
-- replace_symbol_body: Modify code
-- insert_before_symbol: Insert code
-- find_referencing_symbols: Find usages
+ПРАВИЛА МНОГОШАГОВОГО ВЫПОЛНЕНИЯ:
+1. Ты можешь вызывать НЕСКОЛЬКО инструментов подряд для выполнения сложной задачи
+2. После каждого вызова инструмента система автоматически вызовет тебя снова с результатом
+3. Анализируй результат и вызывай следующий инструмент если задача не завершена
+4. Когда ВСЕ действия выполнены - дай текстовый ответ БЕЗ вызова инструментов
 
-Respond in Russian, but call tools with English parameters.";
+ПРИМЕР ПРАВИЛЬНОЙ РАБОТЫ:
+Пользователь: ""Прочитай файл hello.txt и добавь в конец строку 'Вторая строка'""
+Шаг 1: Вызываешь read_file для hello.txt
+Шаг 2: Получаешь содержимое ""Привет, мир!"", вызываешь write_file с ""Привет, мир!\nВторая строка""
+Шаг 3: Получаешь подтверждение записи, даешь текстовый ответ: ""✅ Добавлена строка 'Вторая строка' в конец файла hello.txt""
+
+ПРИМЕР НЕПРАВИЛЬНОЙ РАБОТЫ (НЕ ДЕЛАЙ ТАК!):
+Пользователь: ""Прочитай файл hello.txt и добавь строку""
+Шаг 1: Вызываешь read_file
+Шаг 2: Получаешь содержимое и говоришь ""Готово!"" БЕЗ вызова write_file ❌ НЕПРАВИЛЬНО!
+
+КРИТИЧЕСКИ ВАЖНО:
+- НЕ останавливайся после первого инструмента если задача требует нескольких действий!
+- ВСЕГДА используй read_file перед изменением существующего файла
+- write_file ПЕРЕЗАПИСЫВАЕТ файл полностью (для добавления: read_file → write_file(старое + новое))
+
+Когда НЕ нужно вызывать инструменты:
+- Приветствия (""Привет"", ""Здравствуй"")
+- Общие вопросы (""Как дела?"", ""Что ты умеешь?"")
+- Обсуждение планов (""Давай обсудим архитектуру"")
+
+Доступные инструменты:
+- execute_shell_command: Выполнение команд Windows (например, dir, type file.txt)
+- read_file: Чтение содержимого любого файла (ОБЯЗАТЕЛЬНО используй перед изменением!)
+- write_file: Запись/перезапись файла (для JS, HTML, CSS, JSON и других файлов)
+- create_file: Создание нового файла (ошибка если файл существует)
+
+Отвечай на русском языке, параметры инструментов передавай на английском.";
 
             // Добавляем контекст группы диалогов, если он есть
             if (dialogue.DialogueGroup != null)
@@ -169,70 +219,244 @@ Respond in Russian, but call tools with English parameters.";
                 Content = systemMessageContent
             };
 
-            // 5. Send prompt to LLM with system message
-            var messagesWithSystem = new List<Message> { systemMessage };
-            messagesWithSystem.AddRange(dialogue.Messages);
-
-            var llmResponse = await _llmService.SendPromptAsync(
-                prompt,
-                messagesWithSystem,
-                toolDefinitions
-            );
-
-            _logger.LogInformation("LLM response received. HasFunctionCalls: {HasFunctionCalls}, HasTextContent: {HasTextContent}, TextContent: {TextContent}", 
-                llmResponse.FunctionCalls?.Any() ?? false, 
-                !string.IsNullOrEmpty(llmResponse.TextContent),
-                llmResponse.TextContent?.Substring(0, Math.Min(200, llmResponse.TextContent?.Length ?? 0)) ?? "(empty)");
-
-            // 6. Execute function calls if present
-            var resultBuilder = new StringBuilder();
-            var hasExplanation = false;
-
-            // Сначала добавляем рассуждения модели (если есть)
-            if (!string.IsNullOrEmpty(llmResponse.TextContent))
+            // 5. Проверяем, использовать ли DeepSeek API с оркестратором
+            var config = await _configService.GetConfigurationAsync();
+            
+            if (config.UseDeepSeekApi && config.DeepSeek != null && !string.IsNullOrEmpty(config.DeepSeek.ApiKey))
             {
-                _logger.LogInformation("LLM reasoning/explanation, length: {Length}", llmResponse.TextContent.Length);
+                _logger.LogInformation("Используется DeepSeek API с оркестратором для обработки промпта");
                 
-                // Проверяем, не вернула ли модель текст вместо tool call
+                // Используем оркестратор для multi-turn tool calling
+                var messages = new List<object>();
+                
+                // Добавляем системное сообщение
+                messages.Add(new Dictionary<string, object>
+                {
+                    ["role"] = "system",
+                    ["content"] = systemMessageContent
+                });
+                
+                // Добавляем историю диалога
+                foreach (var msg in dialogue.Messages)
+                {
+                    messages.Add(new Dictionary<string, object>
+                    {
+                        ["role"] = msg.Role,
+                        ["content"] = msg.Content
+                    });
+                }
+                
+                // Добавляем текущий промпт пользователя
+                messages.Add(new Dictionary<string, object>
+                {
+                    ["role"] = "user",
+                    ["content"] = prompt
+                });
+                
+                // Запускаем оркестратор
+                // Преобразуем tools в формат DeepSeek API
+                var deepSeekTools = toolDefinitions.Select(t => new Dictionary<string, object>
+                {
+                    ["type"] = "function",
+                    ["function"] = new Dictionary<string, object>
+                    {
+                        ["name"] = t.Name,
+                        ["description"] = t.Description,
+                        ["parameters"] = t.Parameters
+                    }
+                }).Cast<object>().ToList();
+                
+                var orchestratorResult = await _orchestrator.ExecuteTurnAsync(
+                    dialogueId,
+                    messages,
+                    deepSeekTools,
+                    async (functionName, argumentsJson) =>
+                    {
+                        // Callback для выполнения инструментов
+                        var arguments = JsonSerializer.Deserialize<Dictionary<string, object>>(argumentsJson);
+                        var functionCall = new FunctionCall
+                        {
+                            Name = functionName,
+                            Arguments = arguments ?? new Dictionary<string, object>()
+                        };
+                        
+                        // Конвертируем Linux команды в Windows если нужно
+                        if (functionName == "execute_shell_command" && 
+                            functionCall.Arguments.ContainsKey("command"))
+                        {
+                            var command = functionCall.Arguments["command"]?.ToString() ?? "";
+                            var convertedCommand = ConvertLinuxCommandToWindows(command);
+                            _logger.LogInformation("Command conversion: '{Original}' -> '{Converted}'", command, convertedCommand);
+                            functionCall.Arguments["command"] = convertedCommand;
+                        }
+                        
+                        try
+                        {
+                            var result = await ExecuteFunctionCallAsync(functionCall, projectPath);
+                            _logger.LogInformation("Function {FunctionName} executed successfully. Result length: {Length}", 
+                                functionName, result?.Length ?? 0);
+                            
+                            // Ограничиваем размер результата
+                            var truncatedResult = result != null && result.Length > 2000 
+                                ? result.Substring(0, 2000) + "\n... (результат обрезан)" 
+                                : result ?? "";
+                            
+                            return truncatedResult;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error executing function {FunctionName}", functionName);
+                            return $"Ошибка: {ex.Message}";
+                        }
+                    },
+                    maxSubTurns: 10);
+                
+                if (!orchestratorResult.Success)
+                {
+                    throw new Exception($"Ошибка оркестратора: {orchestratorResult.ErrorMessage}");
+                }
+                
+                var responseContent = CleanTechnicalJargon(orchestratorResult.FinalAnswer);
+                
+                // Если ответ пустой - добавляем fallback сообщение
+                if (string.IsNullOrWhiteSpace(responseContent))
+                {
+                    responseContent = "Задача выполнена.";
+                }
+                
+                _logger.LogInformation("Оркестратор завершил работу. Выполнено суб-запросов: {SubTurns}", 
+                    orchestratorResult.SubTurnsExecuted);
+                
+                // Сохраняем ответ ассистента
+                var assistantMessage = new Message
+                {
+                    DialogueId = dialogueId,
+                    Role = "assistant",
+                    Content = responseContent,
+                    Timestamp = DateTime.UtcNow
+                };
+                _dbContext.Messages.Add(assistantMessage);
+                await _dbContext.SaveChangesAsync();
+                
+                return assistantMessage.Content;
+            }
+            else
+            {
+                _logger.LogInformation("Используется стандартный LLM сервис (не DeepSeek API)");
+                
+                // Старая логика для Ollama и других провайдеров
+                var messagesWithSystem = new List<Message> { systemMessage };
+                messagesWithSystem.AddRange(dialogue.Messages);
+
+                var resultBuilder = new StringBuilder();
+                var maxIterations = 5;
+                var iteration = 0;
+                
+                var apiMessages = new List<Dictionary<string, object>>();
+                
+                apiMessages.Add(new Dictionary<string, object>
+                {
+                    ["role"] = "system",
+                    ["content"] = systemMessageContent
+                });
+                
+                foreach (var msg in dialogue.Messages)
+                {
+                    apiMessages.Add(new Dictionary<string, object>
+                    {
+                        ["role"] = msg.Role,
+                        ["content"] = msg.Content
+                    });
+                }
+                
+                apiMessages.Add(new Dictionary<string, object>
+                {
+                    ["role"] = "user",
+                    ["content"] = prompt
+                });
+                
+                while (iteration < maxIterations)
+            {
+                iteration++;
+                _logger.LogInformation("=== ИТЕРАЦИЯ {Iteration} ===", iteration);
+                _logger.LogInformation("API Messages count: {Count}", apiMessages.Count);
+                
+                // Конвертируем apiMessages обратно в List<Message> для SendPromptAsync
+                var messagesForLlm = apiMessages.Select(m =>
+                {
+                    var msg = new Message
+                    {
+                        Role = m["role"].ToString() ?? "user",
+                        Content = m.GetValueOrDefault("content")?.ToString() ?? "",
+                        Timestamp = DateTime.UtcNow
+                    };
+                    
+                    // Добавляем tool_calls если есть
+                    if (m.ContainsKey("tool_calls"))
+                    {
+                        msg.ToolCalls = m["tool_calls"] as List<Dictionary<string, object>>;
+                    }
+                    
+                    // Добавляем tool_call_id если есть
+                    if (m.ContainsKey("tool_call_id"))
+                    {
+                        msg.ToolCallId = m["tool_call_id"]?.ToString();
+                    }
+                    
+                    return msg;
+                }).ToList();
+                
+                var llmResponse = await _llmService.SendPromptAsync(
+                    "", // Промпт уже в истории
+                    messagesForLlm,
+                    toolDefinitions
+                );
+
+                _logger.LogInformation("LLM response received. HasFunctionCalls: {HasFunctionCalls}, HasTextContent: {HasTextContent}", 
+                    llmResponse.FunctionCalls?.Any() ?? false, 
+                    !string.IsNullOrEmpty(llmResponse.TextContent));
+
+                // Если модель вернула текст без tool calls - это финальный ответ
                 if (llmResponse.FunctionCalls == null || !llmResponse.FunctionCalls.Any())
                 {
-                    // Пытаемся извлечь команду из текста
-                    var extractedCall = TryExtractToolCallFromText(llmResponse.TextContent);
-                    if (extractedCall != null)
+                    if (!string.IsNullOrEmpty(llmResponse.TextContent))
                     {
-                        _logger.LogWarning("Model returned text instead of tool call. Extracted: {FunctionName}", extractedCall.Name);
-                        llmResponse.FunctionCalls = new List<FunctionCall> { extractedCall };
+                        var cleanedContent = CleanTechnicalJargon(llmResponse.TextContent);
+                        if (!string.IsNullOrWhiteSpace(cleanedContent))
+                        {
+                            resultBuilder.AppendLine(cleanedContent);
+                        }
                     }
+                    break; // Выходим из цикла - задача выполнена
                 }
-                
-                // Фильтруем технические сообщения
-                var cleanedContent = CleanTechnicalJargon(llmResponse.TextContent);
-                if (!string.IsNullOrWhiteSpace(cleanedContent))
-                {
-                    resultBuilder.AppendLine(cleanedContent);
-                    resultBuilder.AppendLine();
-                    hasExplanation = true;
-                }
-            }
 
-            // Затем выполняем инструменты
-            if (llmResponse.FunctionCalls?.Any() == true)
-            {
+                // Модель вернула tool calls - добавляем сообщение assistant с tool_calls
+                var toolCallsForApi = llmResponse.FunctionCalls.Select((fc, index) => new Dictionary<string, object>
+                {
+                    ["id"] = $"call_{Guid.NewGuid().ToString("N").Substring(0, 24)}", // Генерируем ID
+                    ["type"] = "function",
+                    ["function"] = new Dictionary<string, object>
+                    {
+                        ["name"] = fc.Name,
+                        ["arguments"] = JsonSerializer.Serialize(fc.Arguments)
+                    }
+                }).ToList();
+                
+                apiMessages.Add(new Dictionary<string, object>
+                {
+                    ["role"] = "assistant",
+                    ["content"] = llmResponse.TextContent ?? "",
+                    ["tool_calls"] = toolCallsForApi
+                });
+                
                 _logger.LogInformation("Processing {Count} function calls", llmResponse.FunctionCalls.Count);
                 
-                // Если модель не дала объяснения, генерируем его сами
-                if (!hasExplanation)
+                // Выполняем tool calls и добавляем результаты как tool messages
+                for (int i = 0; i < llmResponse.FunctionCalls.Count; i++)
                 {
-                    var contextMessage = GenerateContextMessage(llmResponse.FunctionCalls, prompt);
-                    if (!string.IsNullOrEmpty(contextMessage))
-                    {
-                        resultBuilder.AppendLine(contextMessage);
-                        resultBuilder.AppendLine();
-                    }
-                }
-                
-                foreach (var functionCall in llmResponse.FunctionCalls)
-                {
+                    var functionCall = llmResponse.FunctionCalls[i];
+                    var toolCallId = ((List<Dictionary<string, object>>)toolCallsForApi)[i]["id"].ToString();
+                    
                     _logger.LogInformation("Executing function: {FunctionName} with arguments: {Arguments}", 
                         functionCall.Name, 
                         JsonSerializer.Serialize(functionCall.Arguments));
@@ -253,51 +477,51 @@ Respond in Russian, but call tools with English parameters.";
                         _logger.LogInformation("Function {FunctionName} executed successfully. Result length: {Length}", 
                             functionCall.Name, result?.Length ?? 0);
                         
-                        // Показываем результат в понятном формате
-                        if (!string.IsNullOrWhiteSpace(result))
+                        // Ограничиваем размер результата
+                        var truncatedResult = result != null && result.Length > 2000 
+                            ? result.Substring(0, 2000) + "\n... (результат обрезан)" 
+                            : result ?? "";
+                        
+                        // Добавляем результат как tool message
+                        apiMessages.Add(new Dictionary<string, object>
                         {
-                            // Не показываем технические детали, если результат короткий
-                            if (result.Length < 100 && !result.Contains("\n"))
-                            {
-                                resultBuilder.AppendLine($"✅ {result}");
-                            }
-                            else if (result.Length > 500)
-                            {
-                                resultBuilder.AppendLine($"✅ Результат:");
-                                resultBuilder.AppendLine($"   {result.Substring(0, 500)}...");
-                                resultBuilder.AppendLine($"   (показано первые 500 символов из {result.Length})");
-                            }
-                            else
-                            {
-                                resultBuilder.AppendLine($"✅ {result}");
-                            }
-                        }
-                        resultBuilder.AppendLine();
+                            ["role"] = "tool",
+                            ["tool_call_id"] = toolCallId!,
+                            ["content"] = truncatedResult
+                        });
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Error executing function {FunctionName}", functionCall.Name);
-                        resultBuilder.AppendLine($"❌ Ошибка: {ex.Message}");
-                        resultBuilder.AppendLine();
-                        hasExplanation = true; // Помечаем, что есть сообщение об ошибке
+                        
+                        // Добавляем ошибку как tool message
+                        apiMessages.Add(new Dictionary<string, object>
+                        {
+                            ["role"] = "tool",
+                            ["tool_call_id"] = toolCallId!,
+                            ["content"] = $"Ошибка: {ex.Message}"
+                        });
                     }
                 }
                 
-                // Добавляем итоговое сообщение только если не было ошибок и модель не дала объяснения
-                var hasErrors = resultBuilder.ToString().Contains("❌");
-                if (!hasExplanation && !hasErrors)
-                {
-                    resultBuilder.AppendLine("Готово! Операция выполнена успешно.");
-                }
+                _logger.LogInformation("Tool results added to conversation. Total API messages: {Count}", apiMessages.Count);
             }
-            else if (string.IsNullOrEmpty(llmResponse.TextContent))
+            
+            if (iteration >= maxIterations)
             {
-                // Fallback если нет ни function calls, ни text content
-                _logger.LogWarning("LLM returned empty response for dialogue {DialogueId}", dialogueId);
-                resultBuilder.AppendLine("Модель не вернула ответ. Попробуйте переформулировать запрос.");
+                _logger.LogWarning("Достигнут лимит итераций ({MaxIterations})", maxIterations);
+                resultBuilder.AppendLine("\n\n(Достигнут лимит итераций выполнения инструментов)");
             }
 
+            
             var responseContent = resultBuilder.ToString().Trim();
+            
+            // Если ответ пустой - добавляем fallback сообщение
+            if (string.IsNullOrWhiteSpace(responseContent))
+            {
+                responseContent = "Задача выполнена.";
+            }
+            
             _logger.LogInformation("Saving assistant message, content length: {Length}", responseContent.Length);
 
             // 7. Save assistant response
@@ -312,6 +536,7 @@ Respond in Russian, but call tools with English parameters.";
             await _dbContext.SaveChangesAsync();
 
             return assistantMessage.Content;
+            } // Конец блока else (стандартный LLM)
         }
         catch (Exception ex)
         {
@@ -499,14 +724,24 @@ Respond in Russian, but call tools with English parameters.";
     {
         return functionCall.Name switch
         {
+            "activate_project" => await ExecuteActivateProjectAsync(functionCall.Arguments, projectPath),
             "find_symbol" => await ExecuteFindSymbolAsync(functionCall.Arguments),
             "find_referencing_symbols" => await ExecuteFindReferencingSymbolsAsync(functionCall.Arguments),
             "replace_symbol_body" => await ExecuteReplaceSymbolBodyAsync(functionCall.Arguments),
             "execute_shell_command" => await ExecuteShellCommandAsync(functionCall.Arguments, projectPath),
-            "read_file" => await ExecuteReadFileAsync(functionCall.Arguments),
+            "read_file" => await ExecuteReadFileAsync(functionCall.Arguments, projectPath),
             "insert_before_symbol" => await ExecuteInsertBeforeSymbolAsync(functionCall.Arguments),
+            "write_file" => await ExecuteWriteFileAsync(functionCall.Arguments, projectPath),
+            "create_file" => await ExecuteCreateFileAsync(functionCall.Arguments, projectPath),
             _ => throw new NotSupportedException($"Unknown function: {functionCall.Name}")
         };
+    }
+
+    private async Task<string> ExecuteActivateProjectAsync(Dictionary<string, object> arguments, string projectPath)
+    {
+        // Используем projectPath из диалога, если не передан явно
+        var path = arguments.GetValueOrDefault("projectPath")?.ToString() ?? projectPath;
+        return await _serenaService.ActivateProjectAsync(path);
     }
 
     private async Task<string> ExecuteFindSymbolAsync(Dictionary<string, object> arguments)
@@ -534,13 +769,9 @@ Respond in Russian, but call tools with English parameters.";
         return await _directShellService.ExecuteCommandAsync(command, projectPath);
     }
 
-    private async Task<string> ExecuteReadFileAsync(Dictionary<string, object> arguments)
+    private async Task<string> ExecuteReadFileAsync(Dictionary<string, object> arguments, string projectPath)
     {
         var filePath = arguments.GetValueOrDefault("filePath")?.ToString() ?? string.Empty;
-        
-        // Получаем текущий диалог для определения projectPath
-        var dialogue = await _dbContext.Dialogues.FirstOrDefaultAsync();
-        var projectPath = dialogue?.ProjectPath ?? Directory.GetCurrentDirectory();
         
         return await _directShellService.ReadFileAsync(filePath, projectPath);
     }
@@ -552,14 +783,89 @@ Respond in Russian, but call tools with English parameters.";
         return await _serenaService.InsertBeforeSymbolAsync(symbolId, content);
     }
 
-    private List<FunctionDefinition> GetSerenaToolDefinitions()
+    private async Task<string> ExecuteWriteFileAsync(Dictionary<string, object> arguments, string projectPath)
     {
-        return new List<FunctionDefinition>
+        var filePath = arguments.GetValueOrDefault("filePath")?.ToString() ?? string.Empty;
+        var content = arguments.GetValueOrDefault("content")?.ToString() ?? string.Empty;
+        
+        if (string.IsNullOrEmpty(filePath))
+            return "Ошибка: не указан путь к файлу";
+        
+        var fullPath = Path.IsPathRooted(filePath) ? filePath : Path.Combine(projectPath, filePath);
+        
+        try
         {
-            new FunctionDefinition
+            await File.WriteAllTextAsync(fullPath, content);
+            return $"Файл '{filePath}' успешно записан ({content.Length} символов)";
+        }
+        catch (Exception ex)
+        {
+            return $"Ошибка записи файла: {ex.Message}";
+        }
+    }
+
+    private async Task<string> ExecuteCreateFileAsync(Dictionary<string, object> arguments, string projectPath)
+    {
+        var filePath = arguments.GetValueOrDefault("filePath")?.ToString() ?? string.Empty;
+        var content = arguments.GetValueOrDefault("content")?.ToString() ?? string.Empty;
+        
+        if (string.IsNullOrEmpty(filePath))
+            return "Ошибка: не указан путь к файлу";
+        
+        var fullPath = Path.IsPathRooted(filePath) ? filePath : Path.Combine(projectPath, filePath);
+        
+        // Проверяем, существует ли файл
+        if (File.Exists(fullPath))
+            return $"Ошибка: файл '{filePath}' уже существует. Используйте write_file для перезаписи.";
+        
+        try
+        {
+            // Создаем директорию если не существует
+            var directory = Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+            
+            await File.WriteAllTextAsync(fullPath, content);
+            return $"Файл '{filePath}' успешно создан ({content.Length} символов)";
+        }
+        catch (Exception ex)
+        {
+            return $"Ошибка создания файла: {ex.Message}";
+        }
+    }
+
+    private List<FunctionDefinition> GetSerenaToolDefinitions(bool isCSharpProject = true)
+    {
+        var tools = new List<FunctionDefinition>();
+        
+        // Инструменты для C# проектов
+        if (isCSharpProject)
+        {
+            tools.Add(new FunctionDefinition
+            {
+                Name = "activate_project",
+                Description = "Activate a C# project for semantic analysis. MUST be called FIRST before using any other code analysis tools (find_symbol, replace_symbol_body, etc.). This initializes the Serena MCP server with the project context.",
+                Parameters = new Dictionary<string, object>
+                {
+                    ["type"] = "object",
+                    ["properties"] = new Dictionary<string, object>
+                    {
+                        ["projectPath"] = new Dictionary<string, object>
+                        {
+                            ["type"] = "string",
+                            ["description"] = "The full path to the C# project directory (optional, uses current dialogue project path if not provided)"
+                        }
+                    },
+                    ["required"] = new string[] { }
+                }
+            });
+            
+            tools.Add(new FunctionDefinition
             {
                 Name = "find_symbol",
-                Description = "Find a symbol (class, method, property) by name in the C# project",
+                Description = "Find a symbol (class, method, property) by name in the C# project. IMPORTANT: You must call activate_project FIRST before using this tool.",
                 Parameters = new Dictionary<string, object>
                 {
                     ["type"] = "object",
@@ -573,8 +879,9 @@ Respond in Russian, but call tools with English parameters.";
                     },
                     ["required"] = new[] { "symbolName" }
                 }
-            },
-            new FunctionDefinition
+            });
+            
+            tools.Add(new FunctionDefinition
             {
                 Name = "find_referencing_symbols",
                 Description = "Find all references to a specific symbol",
@@ -591,8 +898,9 @@ Respond in Russian, but call tools with English parameters.";
                     },
                     ["required"] = new[] { "symbolId" }
                 }
-            },
-            new FunctionDefinition
+            });
+            
+            tools.Add(new FunctionDefinition
             {
                 Name = "replace_symbol_body",
                 Description = "Replace the body of a method or class",
@@ -614,44 +922,9 @@ Respond in Russian, but call tools with English parameters.";
                     },
                     ["required"] = new[] { "symbolId", "newBody" }
                 }
-            },
-            new FunctionDefinition
-            {
-                Name = "execute_shell_command",
-                Description = "Execute a Windows shell command in the project directory. Use this for file operations (create, delete, move files), running build commands, or any other shell operations. Examples: 'echo text > file.txt' to create a file, 'del file.txt' to delete a file, 'dotnet build' to build the project.",
-                Parameters = new Dictionary<string, object>
-                {
-                    ["type"] = "object",
-                    ["properties"] = new Dictionary<string, object>
-                    {
-                        ["command"] = new Dictionary<string, object>
-                        {
-                            ["type"] = "string",
-                            ["description"] = "The Windows shell command to execute (e.g., 'echo Hello > file.txt', 'del file.txt', 'dotnet build')"
-                        }
-                    },
-                    ["required"] = new[] { "command" }
-                }
-            },
-            new FunctionDefinition
-            {
-                Name = "read_file",
-                Description = "Read the contents of an existing file from the project directory. Use this ONLY to read files that already exist. Provide just the filename (e.g., 'file.txt') or relative path (e.g., 'src/file.txt'), NOT absolute paths.",
-                Parameters = new Dictionary<string, object>
-                {
-                    ["type"] = "object",
-                    ["properties"] = new Dictionary<string, object>
-                    {
-                        ["filePath"] = new Dictionary<string, object>
-                        {
-                            ["type"] = "string",
-                            ["description"] = "The relative path to the file (e.g., 'file.txt' or 'src/file.txt'). Do NOT use absolute paths or placeholders like '/path/to/directory'."
-                        }
-                    },
-                    ["required"] = new[] { "filePath" }
-                }
-            },
-            new FunctionDefinition
+            });
+            
+            tools.Add(new FunctionDefinition
             {
                 Name = "insert_before_symbol",
                 Description = "Insert content before a symbol",
@@ -673,8 +946,97 @@ Respond in Russian, but call tools with English parameters.";
                     },
                     ["required"] = new[] { "symbolId", "content" }
                 }
+            });
+        }
+        
+        // Универсальные инструменты для всех проектов
+        tools.Add(new FunctionDefinition
+        {
+            Name = "execute_shell_command",
+            Description = "Execute a Windows shell command in the project directory. Use this for file operations (create, delete, move files), running build commands, or any other shell operations. Examples: 'echo text > file.txt' to create a file, 'del file.txt' to delete a file, 'dotnet build' to build the project.",
+            Parameters = new Dictionary<string, object>
+            {
+                ["type"] = "object",
+                ["properties"] = new Dictionary<string, object>
+                {
+                    ["command"] = new Dictionary<string, object>
+                    {
+                        ["type"] = "string",
+                        ["description"] = "The Windows shell command to execute (e.g., 'echo Hello > file.txt', 'del file.txt', 'dotnet build')"
+                    }
+                },
+                ["required"] = new[] { "command" }
             }
-        };
+        });
+        
+        tools.Add(new FunctionDefinition
+        {
+            Name = "read_file",
+            Description = "Read the contents of an existing file from the project directory. Use this ONLY to read files that already exist. Provide just the filename (e.g., 'file.txt') or relative path (e.g., 'src/file.txt'), NOT absolute paths.",
+            Parameters = new Dictionary<string, object>
+            {
+                ["type"] = "object",
+                ["properties"] = new Dictionary<string, object>
+                {
+                    ["filePath"] = new Dictionary<string, object>
+                    {
+                        ["type"] = "string",
+                        ["description"] = "The relative path to the file (e.g., 'file.txt' or 'src/file.txt'). Do NOT use absolute paths or placeholders like '/path/to/directory'."
+                    }
+                },
+                ["required"] = new[] { "filePath" }
+            }
+        });
+        
+        tools.Add(new FunctionDefinition
+        {
+            Name = "write_file",
+            Description = "Write or overwrite a file with new content. Use this to modify existing files or create new files. Provide just the filename (e.g., 'file.txt') or relative path (e.g., 'src/file.txt'), NOT absolute paths.",
+            Parameters = new Dictionary<string, object>
+            {
+                ["type"] = "object",
+                ["properties"] = new Dictionary<string, object>
+                {
+                    ["filePath"] = new Dictionary<string, object>
+                    {
+                        ["type"] = "string",
+                        ["description"] = "The relative path to the file (e.g., 'file.txt' or 'src/file.txt'). Do NOT use absolute paths."
+                    },
+                    ["content"] = new Dictionary<string, object>
+                    {
+                        ["type"] = "string",
+                        ["description"] = "The complete content to write to the file"
+                    }
+                },
+                ["required"] = new[] { "filePath", "content" }
+            }
+        });
+        
+        tools.Add(new FunctionDefinition
+        {
+            Name = "create_file",
+            Description = "Create a new file with content. This will fail if the file already exists - use write_file to overwrite existing files. Automatically creates parent directories if needed.",
+            Parameters = new Dictionary<string, object>
+            {
+                ["type"] = "object",
+                ["properties"] = new Dictionary<string, object>
+                {
+                    ["filePath"] = new Dictionary<string, object>
+                    {
+                        ["type"] = "string",
+                        ["description"] = "The relative path to the new file (e.g., 'file.txt' or 'src/file.txt'). Do NOT use absolute paths."
+                    },
+                    ["content"] = new Dictionary<string, object>
+                    {
+                        ["type"] = "string",
+                        ["description"] = "The content for the new file"
+                    }
+                },
+                ["required"] = new[] { "filePath", "content" }
+            }
+        });
+        
+        return tools;
     }
 
     private string TruncatePrompt(string prompt, int maxLength)
@@ -971,9 +1333,22 @@ Respond in Russian, but call tools with English parameters.";
     /// <summary>
     /// Получает список доступных инструментов для LLM (публичный метод для StreamingService)
     /// </summary>
-    public List<FunctionDefinition> GetAvailableTools()
+    public List<FunctionDefinition> GetAvailableTools(string? projectPath = null)
     {
-        return GetSerenaToolDefinitions();
+        // Если projectPath не передан, пытаемся получить из текущего диалога
+        if (string.IsNullOrEmpty(projectPath))
+        {
+            projectPath = Directory.GetCurrentDirectory();
+            _logger.LogWarning("ProjectPath not provided to GetAvailableTools, using current directory: {ProjectPath}", projectPath);
+        }
+        
+        // Определяем тип проекта
+        var isCSharpProject = Directory.GetFiles(projectPath, "*.csproj", SearchOption.TopDirectoryOnly).Any();
+        
+        _logger.LogInformation("GetAvailableTools: ProjectPath={ProjectPath}, IsCSharp={IsCSharp}", 
+            projectPath, isCSharpProject);
+        
+        return GetSerenaToolDefinitions(isCSharpProject);
     }
     
     /// <summary>

@@ -307,7 +307,7 @@ public class MockPromptProcessor : IPromptProcessor
         return $"Задача выполнена успешно (mock response)";
     }
     
-    public List<CSharpRefactoringAssistant.Models.FunctionDefinition> GetAvailableTools()
+    public List<CSharpRefactoringAssistant.Models.FunctionDefinition> GetAvailableTools(string? projectPath = null)
     {
         return new List<CSharpRefactoringAssistant.Models.FunctionDefinition>();
     }

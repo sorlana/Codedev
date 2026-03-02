@@ -30,12 +30,14 @@ public class DirectShellService : IDirectShellService
             var processStartInfo = new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = $"/c {command}",
+                Arguments = $"/c chcp 65001 >nul && {command}", // Устанавливаем UTF-8 кодировку
                 WorkingDirectory = workingDirectory,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = true
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
             };
 
             using var process = new Process { StartInfo = processStartInfo };

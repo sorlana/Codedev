@@ -116,6 +116,8 @@ builder.Services.AddScoped<ILlmService>(sp =>
 });
 builder.Services.AddScoped<IPromptProcessor, PromptProcessor>();
 builder.Services.AddScoped<ITaskExecutorService, TaskExecutorService>();
+builder.Services.AddScoped<IDeepSeekOrchestratorService, DeepSeekOrchestratorService>();
+builder.Services.AddScoped<ITaskExecutionService, TaskExecutionService>();
 
 // Регистрация Lazy<ITaskExecutorService> для разрешения циклической зависимости
 builder.Services.AddScoped<Lazy<ITaskExecutorService>>(sp => 
@@ -157,16 +159,8 @@ using (var scope = app.Services.CreateScope())
     dbContext.Database.EnsureCreated();
     
     // Initialize MCP Client
-    var mcpClient = scope.ServiceProvider.GetRequiredService<IMcpClient>();
-    try
-    {
-        await mcpClient.InitializeAsync();
-        app.Logger.LogInformation("MCP Client initialized successfully");
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogError(ex, "Failed to initialize MCP Client. Serena may not be available.");
-    }
+    // MCP Client будет инициализирован при первом использовании
+    app.Logger.LogInformation("MCP Client will be initialized on first use");
 }
 
 app.UseCors();
@@ -1043,6 +1037,91 @@ app.MapPost("/api/dialogues/{id}/execute-tasks", async (
     catch (Exception ex)
     {
         app.Logger.LogError(ex, "Error starting task execution");
+        return Results.Problem(ex.Message);
+    }
+});
+
+// Endpoint для прямого выполнения задач через DeepSeek API с инструментами
+app.MapPost("/api/dialogues/{id}/execute-tasks-direct", async (
+    int id,
+    RefactoringDbContext dbContext,
+    ITaskExecutionService taskExecutionService,
+    IStreamingService streamingService) =>
+{
+    try
+    {
+        // Получаем диалог с группой
+        var dialogue = await dbContext.Dialogues
+            .Include(d => d.DialogueGroup)
+            .FirstOrDefaultAsync(d => d.Id == id);
+        
+        if (dialogue == null)
+            return Results.NotFound(new { message = "Диалог не найден" });
+        
+        if (dialogue.DialogueGroup == null)
+            return Results.BadRequest(new { message = "Диалог не принадлежит группе" });
+        
+        if (string.IsNullOrWhiteSpace(dialogue.DialogueGroup.Tasks))
+            return Results.BadRequest(new { message = "Задачи не заполнены в группе" });
+        
+        // Запускаем выполнение в фоновом режиме
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                app.Logger.LogInformation("Начало прямого выполнения задач для диалога {DialogueId}", id);
+                
+                // Выполняем задачи через DeepSeek API
+                var result = await taskExecutionService.ExecuteTasksAsync(
+                    id,
+                    dialogue.DialogueGroup.Requirements ?? "",
+                    dialogue.DialogueGroup.Design ?? "",
+                    dialogue.DialogueGroup.Tasks);
+                
+                // Если выполнение успешно, помечаем все задачи как выполненные
+                if (result.Success)
+                {
+                    using var scope = app.Services.CreateScope();
+                    var scopedDbContext = scope.ServiceProvider.GetRequiredService<RefactoringDbContext>();
+                    
+                    var dialogueToUpdate = await scopedDbContext.Dialogues
+                        .Include(d => d.DialogueGroup)
+                        .FirstOrDefaultAsync(d => d.Id == id);
+                    
+                    if (dialogueToUpdate?.DialogueGroup != null && !string.IsNullOrWhiteSpace(dialogueToUpdate.DialogueGroup.Tasks))
+                    {
+                        // Заменяем все [ ] на [x] в поле Tasks
+                        dialogueToUpdate.DialogueGroup.Tasks = dialogueToUpdate.DialogueGroup.Tasks.Replace("[ ]", "[x]");
+                        await scopedDbContext.SaveChangesAsync();
+                        
+                        app.Logger.LogInformation("Все задачи помечены как выполненные для группы {GroupId}", dialogueToUpdate.DialogueGroup.Id);
+                    }
+                }
+                
+                // Формируем итоговое сообщение
+                var finalMessage = result.Success 
+                    ? $"✅ Задачи успешно выполнены!\n\n{result.Message}\n{result.LaunchInstructions}"
+                    : $"❌ {result.Message}";
+                
+                // Отправляем итоговое сообщение в чат через streaming
+                await streamingService.StreamResponseAsync(id, finalMessage);
+                
+                app.Logger.LogInformation("Прямое выполнение задач завершено для диалога {DialogueId}", id);
+            }
+            catch (Exception ex)
+            {
+                app.Logger.LogError(ex, "Ошибка прямого выполнения задач для диалога {DialogueId}", id);
+                
+                // Отправляем сообщение об ошибке в чат
+                await streamingService.StreamResponseAsync(id, $"❌ Ошибка выполнения задач: {ex.Message}");
+            }
+        });
+        
+        return Results.Ok(new { message = "Выполнение задач запущено" });
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Ошибка запуска прямого выполнения задач");
         return Results.Problem(ex.Message);
     }
 });

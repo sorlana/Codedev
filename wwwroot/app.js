@@ -1758,6 +1758,11 @@ async function loadDialogueGroups() {
             dialogueGroups.forEach(group => {
                 const groupDialogues = dialogues.filter(d => d.dialogueGroupId === group.id);
                 const isCollapsed = group.isCollapsed ? 'collapsed' : '';
+                const allTasksCompleted = areAllTasksCompleted(group.tasks);
+                const runButtonClass = allTasksCompleted ? 'completed' : '';
+                const runButtonTitle = allTasksCompleted ? 'Все задачи выполнены' : 'Запустить задачи';
+                const runButtonDisabled = allTasksCompleted ? 'disabled' : '';
+                const runButtonIcon = allTasksCompleted ? 'check_circle' : 'play_arrow';
                 
                 html += `
                     <div class="dialogue-group ${isCollapsed}" data-group-id="${group.id}">
@@ -1767,6 +1772,12 @@ async function loadDialogueGroups() {
                             <div class="group-actions" onclick="event.stopPropagation()">
                                 <button class="group-action-btn add" onclick="createDialogueInGroup(${group.id})" title="Добавить диалог"><span class="material-icons">add</span></button>
                                 <button class="group-action-btn context" onclick="openContextModal(${group.id})" title="Контекст"><span class="material-icons">description</span></button>
+                                <button class="group-action-btn run ${runButtonClass}" 
+                                        onclick="executeGroupTasks(${group.id})" 
+                                        title="${runButtonTitle}"
+                                        ${runButtonDisabled}>
+                                    <span class="material-icons">${runButtonIcon}</span>
+                                </button>
                                 <button class="group-action-btn rename" onclick="renameDialogueGroup(${group.id})" title="Переименовать группу"><span class="material-icons">edit</span></button>
                                 <button class="group-action-btn delete" onclick="deleteDialogueGroup(${group.id})" title="Удалить группу"><span class="material-icons">delete</span></button>
                             </div>
@@ -1818,7 +1829,13 @@ async function loadDialogueGroups() {
                 console.log('[UI] Текущий диалог не найден в базе');
                 currentDialogueId = null;
                 document.getElementById('message-list').innerHTML = '<div class="empty-state">Выберите диалог из списка</div>';
+            } else {
+                // Если текущий диалог существует, вызываем checkAndShowTasksButton
+                await checkAndShowTasksButton();
             }
+        } else if (dialogues.length > 0) {
+            // Если нет текущего диалога, но есть диалоги, выбираем первый
+            await selectDialogue(dialogues[0].id);
         }
         
     } catch (error) {
@@ -1983,6 +2000,11 @@ async function selectDialogue(dialogueId) {
     } catch (error) {
         console.error('Error checking execution status:', error);
     }
+    
+    // Проверка и отображение кнопки "Задачи"
+    checkAndShowTasksButton();
+    
+    console.log('[UI] Диалог выбран:', currentDialogueId);
 }
 
 // Глобальная переменная для отслеживания времени streaming
@@ -2194,6 +2216,20 @@ function registerWebSocketHandlers(client) {
         // Сброс флага streaming
         isStreamingActive = false;
         
+        // Удаляем прогресс-контейнер выполнения задач если он есть
+        const taskExecutionProgress = document.getElementById('task-execution-progress');
+        if (taskExecutionProgress) {
+            console.log('[Tasks] Удаление прогресс-контейнера выполнения задач');
+            taskExecutionProgress.remove();
+        }
+        
+        // Проверяем, завершилось ли выполнение задач (по содержимому сообщения)
+        const content = payload.content || payload.Content || '';
+        if (content.includes('✅') && content.includes('Задачи успешно выполнены')) {
+            console.log('[Tasks] Обнаружено завершение выполнения задач, воспроизводим звук');
+            playNotificationSound();
+        }
+        
         // Используем фиксированный ID для streaming сообщения
         const streamingId = 'streaming-message-active';
         
@@ -2227,6 +2263,12 @@ function registerWebSocketHandlers(client) {
         const sendButton = document.getElementById('send-button');
         sendButton.disabled = false;
         sendButton.textContent = 'Отправить';
+        
+        // Включаем кнопку "Выполнить задачи" обратно
+        const executeTasksButton = document.getElementById('execute-tasks-button');
+        if (executeTasksButton) {
+            executeTasksButton.disabled = false;
+        }
     });
     
     // Обработчик ошибок
@@ -2327,6 +2369,24 @@ function registerWebSocketHandlers(client) {
         const sendButton = document.getElementById('send-button');
         sendButton.disabled = false;
         sendButton.textContent = 'Отправить';
+    });
+    
+    // Обработчик прогресса выполнения задач
+    client.on('task_progress', (payload) => {
+        console.log('[Tasks] Получен прогресс задачи:', payload);
+        handleTaskProgress(payload);
+    });
+    
+    // Обработчик прогресса генерации плана задач
+    client.on('plan_generation_progress', (payload) => {
+        console.log('[Tasks] Получен прогресс генерации плана:', payload);
+        updatePlanGenerationProgress(payload);
+    });
+    
+    // Обработчик прогресса выполнения задач
+    client.on('task_execution_progress', (payload) => {
+        console.log('[Tasks] Получен прогресс выполнения задач:', payload);
+        updateTaskExecutionProgress(payload);
     });
 }
 
@@ -3904,6 +3964,77 @@ async function deleteDialogueGroup(groupId) {
 }
 
 /**
+ * Проверка, все ли задачи в списке выполнены
+ */
+function areAllTasksCompleted(tasksText) {
+    if (!tasksText || tasksText.trim() === '') {
+        console.log('[areAllTasksCompleted] Нет текста задач');
+        return false;
+    }
+    
+    // Ищем все чекбоксы в формате [ ] или [x]
+    const checkboxPattern = /\[([ xX])\]/g;
+    const matches = tasksText.match(checkboxPattern);
+    
+    console.log('[areAllTasksCompleted] Tasks text:', tasksText);
+    console.log('[areAllTasksCompleted] Matches:', matches);
+    
+    if (!matches || matches.length === 0) {
+        console.log('[areAllTasksCompleted] Нет чекбоксов');
+        return false; // Нет задач с чекбоксами
+    }
+    
+    // Проверяем, все ли чекбоксы отмечены
+    const allCompleted = matches.every(match => match === '[x]' || match === '[X]');
+    console.log('[areAllTasksCompleted] All completed:', allCompleted);
+    return allCompleted;
+}
+
+/**
+ * Запуск выполнения задач группы
+ */
+async function executeGroupTasks(groupId) {
+    console.log('[UI] Запуск выполнения задач для группы:', groupId);
+    
+    try {
+        // Находим первый диалог в группе
+        const group = dialogueGroups.find(g => g.id === groupId);
+        if (!group) {
+            showNotification('Группа не найдена', 'error');
+            return;
+        }
+        
+        const groupDialogues = dialogues.filter(d => d.dialogueGroupId === groupId);
+        if (groupDialogues.length === 0) {
+            showNotification('В группе нет диалогов. Создайте диалог для выполнения задач.', 'error');
+            return;
+        }
+        
+        // Выбираем первый диалог
+        const firstDialogue = groupDialogues[0];
+        await selectDialogue(firstDialogue.id);
+        
+        // Запускаем выполнение задач
+        const response = await fetch(`/api/dialogues/${firstDialogue.id}/execute-tasks-direct`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Ошибка запуска задач');
+        }
+        
+        showNotification('Задачи запущены', 'success');
+    } catch (error) {
+        console.error('[UI] Ошибка запуска задач:', error);
+        showNotification(`Ошибка: ${error.message}`, 'error');
+    }
+}
+
+/**
  * Открытие модального окна контекста группы
  */
 async function openContextModal(groupId) {
@@ -4008,8 +4139,1114 @@ async function saveGroupContext() {
         // Показываем уведомление
         showStatusMessage('Контекст группы сохранен', 'success');
         
+        // Проверяем и обновляем кнопку "Задачи"
+        checkAndShowTasksButton();
+        
     } catch (error) {
         console.error('[UI] Ошибка сохранения контекста:', error);
         alert('Ошибка сохранения контекста: ' + error.message);
     }
 }
+
+
+// ============================================================================
+// АВТОМАТИЧЕСКОЕ ПЛАНИРОВАНИЕ И ВЫПОЛНЕНИЕ ЗАДАЧ
+// ============================================================================
+
+let currentTaskPlan = null; // Текущий план задач
+let runningTasks = new Set(); // Множество ID выполняющихся задач
+
+/**
+ * Проверка наличия Tasks в текущей группе и отображение кнопки "Задачи"
+ */
+async function checkAndShowTasksButton() {
+    const tasksButton = document.getElementById('tasks-button');
+    const executeTasksButton = document.getElementById('execute-tasks-button');
+    const deletePlanButton = document.getElementById('delete-plan-button');
+    
+    if (!tasksButton || !executeTasksButton || !deletePlanButton) return;
+    
+    // Проверяем состояние DeepSeek API toggle
+    const deepSeekEnabled = await isDeepSeekApiEnabled();
+    
+    // Проверяем, есть ли текущий диалог и группа с заполненным Tasks
+    if (currentDialogueId) {
+        const dialogue = dialogues.find(d => d.id === currentDialogueId);
+        
+        if (dialogue && dialogue.dialogueGroupId) {
+            const group = dialogueGroups.find(g => g.id === dialogue.dialogueGroupId);
+            
+            if (group) {
+                // Проверяем заполненность ВСЕХ полей
+                const hasRequirements = group.requirements && group.requirements.trim();
+                const hasDesign = group.design && group.design.trim();
+                const hasTasks = group.tasks && group.tasks.trim();
+                
+                if (hasRequirements && hasDesign && hasTasks) {
+                    // Все поля заполнены
+                    
+                    // Кнопка "Выполнить задачи" показывается ВСЕГДА если DeepSeek API включен и все поля заполнены
+                    if (deepSeekEnabled) {
+                        executeTasksButton.style.display = 'flex';
+                        executeTasksButton.disabled = false;
+                    } else {
+                        executeTasksButton.style.display = 'none';
+                    }
+                    
+                    // Проверяем существует ли уже план (для кнопок создания/удаления плана)
+                    try {
+                        const response = await fetch(`${API_BASE}/api/dialogues/${currentDialogueId}/task-plan`);
+                        
+                        if (response.ok) {
+                            // План существует - показываем кнопку удаления, скрываем кнопку создания
+                            tasksButton.style.display = 'none';
+                            deletePlanButton.style.display = 'flex';
+                        } else if (response.status === 404) {
+                            // План не существует - показываем кнопку создания, скрываем кнопку удаления
+                            tasksButton.style.display = 'flex';
+                            tasksButton.disabled = false;
+                            tasksButton.title = 'Сгенерировать план';
+                            deletePlanButton.style.display = 'none';
+                        } else {
+                            // Ошибка - скрываем обе кнопки
+                            tasksButton.style.display = 'none';
+                            deletePlanButton.style.display = 'none';
+                        }
+                    } catch (error) {
+                        console.error('[Tasks] Ошибка проверки плана:', error);
+                        // При ошибке показываем кнопку создания как активную
+                        tasksButton.style.display = 'flex';
+                        tasksButton.disabled = false;
+                        tasksButton.title = 'Сгенерировать план';
+                        deletePlanButton.style.display = 'none';
+                    }
+                    return;
+                }
+            }
+        }
+    }
+    
+    // Если условия не выполнены - скрываем все кнопки
+    tasksButton.style.display = 'none';
+    executeTasksButton.style.display = 'none';
+    deletePlanButton.style.display = 'none';
+}
+
+// Функция loadTaskPlanIfExists удалена - функционал планов задач больше не используется
+
+/**
+ * Открытие панели задач и создание плана
+ */
+async function openTaskPanel() {
+    console.log('[Tasks] Открытие панели задач');
+    
+    if (!currentDialogueId) {
+        alert('Выберите диалог');
+        return;
+    }
+    
+    // Проверяем заполненность всех полей контекста группы
+    const dialogue = dialogues.find(d => d.id === currentDialogueId);
+    if (!dialogue || !dialogue.dialogueGroupId) {
+        alert('Диалог не принадлежит ни одной группе');
+        return;
+    }
+    
+    const group = dialogueGroups.find(g => g.id === dialogue.dialogueGroupId);
+    if (!group) {
+        alert('Группа диалогов не найдена');
+        return;
+    }
+    
+    // Валидация заполненности полей
+    const missingFields = [];
+    
+    if (!group.requirements || !group.requirements.trim()) {
+        missingFields.push('Требования (requirements.md)');
+    }
+    
+    if (!group.design || !group.design.trim()) {
+        missingFields.push('Проектирование (design.md)');
+    }
+    
+    if (!group.tasks || !group.tasks.trim()) {
+        missingFields.push('Задачи (tasks.md)');
+    }
+    
+    if (missingFields.length > 0) {
+        const fieldsList = missingFields.join('\n• ');
+        alert(`Для генерации плана необходимо заполнить следующие поля:\n\n• ${fieldsList}\n\nОткройте контекст группы и заполните все поля.`);
+        return;
+    }
+    
+    try {
+        // Показываем панель задач
+        const app = document.getElementById('app');
+        const taskPanel = document.getElementById('task-panel');
+        
+        app.classList.add('with-task-panel');
+        taskPanel.style.display = 'flex';
+        
+        // Показываем loader
+        const taskList = document.getElementById('task-list');
+        taskList.innerHTML = '<div style="text-align: center; padding: 40px; color: #666;">Загрузка плана задач...<br><div class="task-loader" style="margin: 20px auto;"></div></div>';
+        
+        console.log('[Tasks] Проверка существующего плана для диалога:', currentDialogueId);
+        
+        // Сначала пытаемся загрузить существующий план
+        let response = await fetch(`${API_BASE}/api/dialogues/${currentDialogueId}/task-plan`);
+        
+        if (response.status === 404) {
+            // План не существует, создаем новый
+            console.log('[Tasks] План не найден, создаем новый');
+            taskList.innerHTML = '<div style="text-align: center; padding: 40px; color: #666;">Создание плана задач...<br><div class="task-loader" style="margin: 20px auto;"></div></div>';
+            
+            response = await fetch(`${API_BASE}/api/dialogues/${currentDialogueId}/plan-tasks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+        } else {
+            console.log('[Tasks] Загружен существующий план');
+        }
+        
+        console.log('[Tasks] Получен ответ:', response.status, response.statusText);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[Tasks] Ошибка ответа:', errorText);
+            
+            let errorMessage = 'Ошибка загрузки плана';
+            try {
+                const error = JSON.parse(errorText);
+                errorMessage = error.message || error.title || errorText;
+            } catch {
+                errorMessage = errorText || 'Неизвестная ошибка';
+            }
+            
+            throw new Error(errorMessage);
+        }
+        
+        currentTaskPlan = await response.json();
+        console.log('[Tasks] План загружен:', currentTaskPlan);
+        
+        if (!currentTaskPlan || !currentTaskPlan.tasks || currentTaskPlan.tasks.length === 0) {
+            throw new Error('План задач пуст');
+        }
+        
+        // Отображаем план
+        renderTaskPlan();
+        
+        // Обновляем кнопки - показываем кнопку удаления вместо создания
+        await checkAndShowTasksButton();
+        
+    } catch (error) {
+        console.error('[Tasks] Ошибка открытия панели задач:', error);
+        alert('Ошибка загрузки плана задач: ' + error.message);
+        closeTaskPanel();
+    }
+}
+
+/**
+ * Закрытие панели задач
+ */
+function closeTaskPanel() {
+    const app = document.getElementById('app');
+    const taskPanel = document.getElementById('task-panel');
+    
+    app.classList.remove('with-task-panel');
+    taskPanel.style.display = 'none';
+    
+    // НЕ очищаем currentTaskPlan - план остается в памяти
+    // currentTaskPlan = null;
+    runningTasks.clear();
+}
+
+/**
+ * Обновление прогресса генерации плана задач
+ */
+function updatePlanGenerationProgress(payload) {
+    console.log('[Tasks] Обновление прогресса генерации:', payload);
+    
+    const taskList = document.getElementById('task-list');
+    if (!taskList) {
+        console.warn('[Tasks] Элемент task-list не найден');
+        return;
+    }
+    
+    // Проверяем, есть ли уже прогресс-бар
+    let progressContainer = document.getElementById('plan-generation-progress');
+    
+    if (!progressContainer) {
+        // Создаем контейнер для прогресса
+        progressContainer = document.createElement('div');
+        progressContainer.id = 'plan-generation-progress';
+        progressContainer.style.textAlign = 'center';
+        progressContainer.style.padding = '40px';
+        progressContainer.style.color = '#666';
+        
+        // Добавляем лоадер
+        const loaderDiv = document.createElement('div');
+        loaderDiv.className = 'task-loader';
+        loaderDiv.style.margin = '20px auto';
+        
+        // Добавляем текст прогресса
+        const progressText = document.createElement('div');
+        progressText.id = 'plan-progress-text';
+        progressText.style.marginTop = '20px';
+        progressText.style.fontSize = '14px';
+        progressText.style.fontWeight = '500';
+        
+        // Добавляем прогресс-бар
+        const progressBarContainer = document.createElement('div');
+        progressBarContainer.style.width = '100%';
+        progressBarContainer.style.maxWidth = '400px';
+        progressBarContainer.style.height = '8px';
+        progressBarContainer.style.backgroundColor = '#e0e0e0';
+        progressBarContainer.style.borderRadius = '4px';
+        progressBarContainer.style.margin = '15px auto';
+        progressBarContainer.style.overflow = 'hidden';
+        
+        const progressBar = document.createElement('div');
+        progressBar.id = 'plan-progress-bar';
+        progressBar.style.height = '100%';
+        progressBar.style.backgroundColor = '#4CAF50';
+        progressBar.style.width = '0%';
+        progressBar.style.transition = 'width 0.3s ease';
+        
+        progressBarContainer.appendChild(progressBar);
+        
+        progressContainer.appendChild(loaderDiv);
+        progressContainer.appendChild(progressText);
+        progressContainer.appendChild(progressBarContainer);
+        
+        // Очищаем taskList и добавляем прогресс
+        taskList.innerHTML = '';
+        taskList.appendChild(progressContainer);
+    }
+    
+    // Обновляем текст и прогресс-бар
+    const progressText = document.getElementById('plan-progress-text');
+    const progressBar = document.getElementById('plan-progress-bar');
+    
+    if (progressText && payload.message) {
+        progressText.textContent = payload.message;
+    }
+    
+    if (progressBar && payload.current !== undefined && payload.total !== undefined) {
+        const percentage = payload.total > 0 ? (payload.current / payload.total) * 100 : 0;
+        progressBar.style.width = `${percentage}%`;
+        
+        console.log(`[Tasks] Прогресс: ${payload.current}/${payload.total} (${percentage.toFixed(1)}%)`);
+    }
+    
+    // Если генерация завершена (current === total), удаляем прогресс через небольшую задержку
+    if (payload.current === payload.total && payload.total > 0) {
+        setTimeout(() => {
+            const container = document.getElementById('plan-generation-progress');
+            if (container) {
+                console.log('[Tasks] Генерация завершена, удаляем прогресс-бар');
+                // Не удаляем контейнер, так как план будет загружен и отображен автоматически
+            }
+        }, 1000);
+    }
+}
+
+/**
+ * Воспроизведение звука уведомления
+ */
+function playNotificationSound() {
+    try {
+        const audio = new Audio('/sound.mp3');
+        audio.volume = 0.5; // Громкость 50%
+        audio.play().catch(error => {
+            console.warn('[Sound] Не удалось воспроизвести звук:', error);
+        });
+    } catch (error) {
+        console.error('[Sound] Ошибка воспроизведения звука:', error);
+    }
+}
+
+/**
+ * Обновление прогресса выполнения задач
+ */
+function updateTaskExecutionProgress(payload) {
+    console.log('[Tasks] Обновление прогресса выполнения:', payload);
+    
+    const messageList = document.getElementById('message-list');
+    if (!messageList) {
+        console.warn('[Tasks] Элемент message-list не найден');
+        return;
+    }
+    
+    // Проверяем, есть ли уже прогресс-контейнер
+    let progressContainer = document.getElementById('task-execution-progress');
+    
+    if (!progressContainer) {
+        // Создаем контейнер для прогресса в чате
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message assistant';
+        messageDiv.id = 'task-execution-progress';
+        
+        const roleDiv = document.createElement('div');
+        roleDiv.className = 'message-role';
+        roleDiv.textContent = 'Ассистент';
+        
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        contentDiv.style.padding = '20px';
+        
+        // Добавляем лоадер
+        const loaderDiv = document.createElement('div');
+        loaderDiv.className = 'task-loader';
+        loaderDiv.style.margin = '10px auto';
+        
+        // Добавляем текст прогресса
+        const progressText = document.createElement('div');
+        progressText.id = 'task-execution-text';
+        progressText.style.marginTop = '15px';
+        progressText.style.fontSize = '14px';
+        progressText.style.fontWeight = '500';
+        progressText.style.textAlign = 'center';
+        
+        // Добавляем прогресс-бар
+        const progressBarContainer = document.createElement('div');
+        progressBarContainer.style.width = '100%';
+        progressBarContainer.style.height = '8px';
+        progressBarContainer.style.backgroundColor = '#e0e0e0';
+        progressBarContainer.style.borderRadius = '4px';
+        progressBarContainer.style.margin = '15px 0';
+        progressBarContainer.style.overflow = 'hidden';
+        
+        const progressBar = document.createElement('div');
+        progressBar.id = 'task-execution-bar';
+        progressBar.style.height = '100%';
+        progressBar.style.backgroundColor = '#4CAF50';
+        progressBar.style.width = '0%';
+        progressBar.style.transition = 'width 0.3s ease';
+        
+        progressBarContainer.appendChild(progressBar);
+        
+        contentDiv.appendChild(loaderDiv);
+        contentDiv.appendChild(progressText);
+        contentDiv.appendChild(progressBarContainer);
+        
+        messageDiv.appendChild(roleDiv);
+        messageDiv.appendChild(contentDiv);
+        
+        messageList.appendChild(messageDiv);
+        messageList.scrollTop = messageList.scrollHeight;
+        
+        progressContainer = messageDiv;
+    }
+    
+    // Обновляем текст и прогресс-бар
+    const progressText = document.getElementById('task-execution-text');
+    const progressBar = document.getElementById('task-execution-bar');
+    
+    if (progressText && payload.message) {
+        progressText.textContent = payload.message;
+    }
+    
+    if (progressBar && payload.current !== undefined && payload.total !== undefined && payload.total > 0) {
+        const percentage = (payload.current / payload.total) * 100;
+        progressBar.style.width = `${percentage}%`;
+        
+        console.log(`[Tasks] Прогресс выполнения: ${payload.current}/${payload.total} (${percentage.toFixed(1)}%)`);
+    }
+    
+    // Прокручиваем вниз
+    messageList.scrollTop = messageList.scrollHeight;
+}
+
+/**
+ * Рекурсивное отображение дерева папок
+ */
+function renderFolderTree(node, prefix = '') {
+    if (!node) return '';
+    
+    let html = '';
+    const isRoot = prefix === '';
+    const hasChildren = node.children && node.children.length > 0;
+    
+    // Корневая папка
+    if (isRoot) {
+        html += `<div class="folder-tree-item">${escapeHtml(node.name)}/</div>`;
+        
+        if (hasChildren) {
+            node.children.forEach((child, index) => {
+                const isLast = index === node.children.length - 1;
+                html += renderFolderTreeNode(child, '', isLast);
+            });
+        }
+    }
+    
+    return html;
+}
+
+/**
+ * Отображение узла дерева папок
+ */
+function renderFolderTreeNode(node, prefix, isLast) {
+    if (!node) return '';
+    
+    let html = '';
+    const connector = isLast ? '└── ' : '├── ';
+    const hasChildren = node.children && node.children.length > 0;
+    const icon = hasChildren ? '📁' : '📄';
+    
+    html += `<div class="folder-tree-item">${prefix}${connector}${icon} ${escapeHtml(node.name)}${hasChildren ? '/' : ''}</div>`;
+    
+    if (hasChildren) {
+        const childPrefix = prefix + (isLast ? '    ' : '│   ');
+        node.children.forEach((child, index) => {
+            const childIsLast = index === node.children.length - 1;
+            html += renderFolderTreeNode(child, childPrefix, childIsLast);
+        });
+    }
+    
+    return html;
+}
+
+/**
+ * Отрисовка плана задач
+ */
+function renderTaskPlan() {
+    if (!currentTaskPlan || !currentTaskPlan.tasks) {
+        console.error('[Tasks] Нет плана для отрисовки');
+        return;
+    }
+    
+    const taskList = document.getElementById('task-list');
+    taskList.innerHTML = '';
+    
+    currentTaskPlan.tasks.forEach(task => {
+        const taskElement = createTaskElement(task);
+        taskList.appendChild(taskElement);
+    });
+}
+
+/**
+ * Создание HTML элемента задачи
+ */
+function createTaskElement(task) {
+    const taskDiv = document.createElement('div');
+    taskDiv.className = 'task-item';
+    taskDiv.dataset.taskId = task.id;
+    
+    // Определяем иконку статуса
+    let statusIcon = '○';
+    let statusClass = 'task-status-pending';
+    
+    switch (task.status) {
+        case 'Running':
+            statusIcon = '◐';
+            statusClass = 'task-status-running';
+            break;
+        case 'Completed':
+            statusIcon = '✓';
+            statusClass = 'task-status-completed';
+            break;
+        case 'Failed':
+            statusIcon = '✗';
+            statusClass = 'task-status-failed';
+            break;
+        case 'Stopped':
+            statusIcon = '⏹';
+            statusClass = 'task-status-stopped';
+            break;
+    }
+    
+    // Заголовок задачи
+    const headerHtml = `
+        <div class="task-header" onclick="toggleTaskContent(${task.id})">
+            <div class="task-title">
+                <span class="task-status-icon ${statusClass}">${statusIcon}</span>
+                <span>${task.title}</span>
+                <span class="material-icons" style="font-size: 18px; margin-left: auto;">expand_more</span>
+            </div>
+            <div class="task-controls" onclick="event.stopPropagation()">
+                ${task.status === 'Running' ? 
+                    `<button class="task-btn task-btn-stop" onclick="stopTask(${task.id})">
+                        <span class="material-icons" style="font-size: 14px;">stop</span> Остановить
+                    </button>
+                    <div class="task-loader"></div>` :
+                    `<button class="task-btn task-btn-run" onclick="executeTask(${task.id})">
+                        <span class="material-icons" style="font-size: 14px;">play_arrow</span> Запустить
+                    </button>`
+                }
+            </div>
+        </div>
+    `;
+    
+    // Содержимое задачи
+    let contentHtml = `<div class="task-content" id="task-content-${task.id}">`;
+    
+    if (task.description) {
+        contentHtml += `<div class="task-description">${escapeHtml(task.description)}</div>`;
+    }
+    
+    // Отображение структуры папок в виде дерева
+    if (task.folderStructure) {
+        contentHtml += `
+            <div class="task-folders">
+                <div class="task-folders-title">📁 Структура проекта:</div>
+                <div class="folder-tree">
+                    ${renderFolderTree(task.folderStructure, '')}
+                </div>
+            </div>
+        `;
+    }
+    
+    if (task.subTasks && task.subTasks.length > 0) {
+        contentHtml += `<div class="subtask-list">`;
+        contentHtml += `<div class="task-folders-title" style="margin-top: 12px; margin-bottom: 8px;">📄 Файлы (${task.subTasks.length}):</div>`;
+        
+        task.subTasks.forEach(subtask => {
+            const subtaskId = `${task.id}-${subtask.id}`;
+            contentHtml += `
+                <div class="subtask-item">
+                    <div class="subtask-header" onclick="toggleSubtaskCode(${task.id}, ${subtask.id})">
+                        <span class="subtask-title">${escapeHtml(subtask.filePath || subtask.title)}</span>
+                        <span class="material-icons" style="font-size: 16px;">code</span>
+                    </div>
+                    <div class="subtask-code" id="subtask-code-${subtaskId}">${escapeHtml(subtask.code || '// Код не указан')}</div>
+                </div>
+            `;
+        });
+        contentHtml += '</div>';
+    }
+    
+    contentHtml += '</div>';
+    
+    taskDiv.innerHTML = headerHtml + contentHtml;
+    return taskDiv;
+}
+
+/**
+ * Переключение видимости содержимого задачи
+ */
+function toggleTaskContent(taskId) {
+    const content = document.getElementById(`task-content-${taskId}`);
+    if (content) {
+        content.classList.toggle('expanded');
+    }
+}
+
+/**
+ * Переключение видимости кода подзадачи
+ */
+function toggleSubtaskCode(taskId, subtaskId) {
+    const code = document.getElementById(`subtask-code-${taskId}-${subtaskId}`);
+    if (code) {
+        code.classList.toggle('expanded');
+    }
+}
+
+/**
+ * Выполнение одной задачи
+ */
+async function executeTask(taskId) {
+    console.log('[Tasks] Запуск задачи:', taskId);
+    
+    if (!currentTaskPlan) {
+        alert('План задач не загружен');
+        return;
+    }
+    
+    try {
+        // Обновляем статус задачи на Running
+        const task = currentTaskPlan.tasks.find(t => t.id === taskId);
+        if (task) {
+            task.status = 'Running';
+            runningTasks.add(taskId);
+            renderTaskPlan();
+        }
+        
+        // Отправляем запрос на выполнение
+        const response = await fetch(`${API_BASE}/api/dialogues/${currentDialogueId}/execute-task`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dialogueId: currentDialogueId,
+                planId: currentTaskPlan.planId,
+                taskId: taskId
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Ошибка выполнения задачи');
+        }
+        
+        console.log('[Tasks] Задача запущена успешно');
+        
+    } catch (error) {
+        console.error('[Tasks] Ошибка выполнения задачи:', error);
+        alert('Ошибка выполнения задачи: ' + error.message);
+        
+        // Обновляем статус на Failed
+        const task = currentTaskPlan.tasks.find(t => t.id === taskId);
+        if (task) {
+            task.status = 'Failed';
+            runningTasks.delete(taskId);
+            renderTaskPlan();
+        }
+    }
+}
+
+/**
+ * Остановка выполнения задачи
+ */
+async function stopTask(taskId) {
+    console.log('[Tasks] Остановка задачи:', taskId);
+    
+    if (!currentTaskPlan) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/dialogues/${currentDialogueId}/stop-task`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                planId: currentTaskPlan.planId,
+                taskId: taskId
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Ошибка остановки задачи');
+        }
+        
+        // Обновляем статус
+        const task = currentTaskPlan.tasks.find(t => t.id === taskId);
+        if (task) {
+            task.status = 'Stopped';
+            runningTasks.delete(taskId);
+            renderTaskPlan();
+        }
+        
+    } catch (error) {
+        console.error('[Tasks] Ошибка остановки задачи:', error);
+    }
+}
+
+/**
+ * Выполнение всех задач по цепочке
+ */
+async function executeAllTasks() {
+    console.log('[Tasks] Запуск всех задач');
+    
+    if (!currentTaskPlan || !currentTaskPlan.tasks) {
+        alert('План задач не загружен');
+        return;
+    }
+    
+    const executeAllBtn = document.getElementById('execute-all-tasks-btn');
+    executeAllBtn.disabled = true;
+    executeAllBtn.innerHTML = '<div class="task-loader"></div> Выполнение...';
+    
+    try {
+        for (const task of currentTaskPlan.tasks) {
+            if (task.status !== 'Completed') {
+                await executeTask(task.id);
+                // Ждем завершения задачи (в реальности это будет через WebSocket)
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+    } catch (error) {
+        console.error('[Tasks] Ошибка выполнения всех задач:', error);
+    } finally {
+        executeAllBtn.disabled = false;
+        executeAllBtn.innerHTML = '<span class="material-icons">play_arrow</span> Запустить все задачи';
+    }
+}
+
+/**
+ * Обработка прогресса выполнения задачи через WebSocket
+ */
+function handleTaskProgress(payload) {
+    console.log('[Tasks] Прогресс задачи:', payload);
+    
+    const { taskId, progress, planId } = payload;
+    
+    // Добавляем сообщение в чат
+    if (progress) {
+        addMessageToChat('assistant', progress);
+    }
+    
+    // Обновляем статус задачи в UI
+    if (currentTaskPlan && currentTaskPlan.planId === planId) {
+        const task = currentTaskPlan.tasks.find(t => t.id === taskId);
+        if (task) {
+            // Определяем статус по тексту прогресса
+            if (progress.includes('Начало выполнения')) {
+                task.status = 'Running';
+                runningTasks.add(taskId);
+            } else if (progress.includes('✓') || progress.includes('выполнена успешно')) {
+                task.status = 'Completed';
+                runningTasks.delete(taskId);
+            } else if (progress.includes('✗') || progress.includes('Ошибка')) {
+                task.status = 'Failed';
+                runningTasks.delete(taskId);
+            } else if (progress.includes('⏹') || progress.includes('остановлено')) {
+                task.status = 'Stopped';
+                runningTasks.delete(taskId);
+            }
+            
+            // Перерисовываем план задач
+            renderTaskPlan();
+        }
+    }
+}
+
+/**
+ * Вспомогательная функция для экранирования HTML
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+/**
+ * Удаление плана задач
+ */
+async function deleteTaskPlan() {
+    if (!currentDialogueId) {
+        alert('Выберите диалог');
+        return;
+    }
+    
+    // Подтверждение удаления
+    if (!confirm('Вы уверены, что хотите удалить план задач? Это действие нельзя отменить.')) {
+        return;
+    }
+    
+    try {
+        console.log('[Tasks] Удаление плана задач для диалога:', currentDialogueId);
+        
+        const response = await fetch(`${API_BASE}/api/dialogues/${currentDialogueId}/task-plan`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[Tasks] Ошибка удаления:', errorText);
+            
+            let errorMessage = 'Ошибка удаления плана';
+            try {
+                const error = JSON.parse(errorText);
+                errorMessage = error.message || error.title || errorText;
+            } catch {
+                errorMessage = errorText || 'Неизвестная ошибка';
+            }
+            
+            throw new Error(errorMessage);
+        }
+        
+        console.log('[Tasks] План задач успешно удален');
+        
+        // Очищаем текущий план
+        currentTaskPlan = null;
+        
+        // Закрываем панель задач
+        closeTaskPanel();
+        
+        // Обновляем кнопки
+        await checkAndShowTasksButton();
+        
+        // Показываем уведомление
+        showStatusMessage('План задач удален', 'success');
+        
+    } catch (error) {
+        console.error('[Tasks] Ошибка удаления плана задач:', error);
+        alert('Ошибка удаления плана задач: ' + error.message);
+    }
+}
+
+// Добавляем обработчик клика на кнопку "Задачи"
+document.addEventListener('DOMContentLoaded', () => {
+    const tasksButton = document.getElementById('tasks-button');
+    if (tasksButton) {
+        tasksButton.addEventListener('click', openTaskPanel);
+    }
+    
+    const deletePlanButton = document.getElementById('delete-plan-button');
+    if (deletePlanButton) {
+        deletePlanButton.addEventListener('click', deleteTaskPlan);
+    }
+});
+
+
+// ============================================================================
+// DEEPSEEK API TOGGLE
+// ============================================================================
+
+/**
+ * Загрузка состояния toggle при старте приложения
+ */
+async function loadDeepSeekToggleState() {
+    try {
+        const response = await fetch(`${API_BASE}/api/configuration`);
+        if (!response.ok) {
+            console.error('[DeepSeek] Ошибка загрузки конфигурации');
+            return;
+        }
+        
+        const data = await response.json();
+        const config = data.configuration;
+        
+        if (config) {
+            const toggle = document.getElementById('deepseek-api-toggle');
+            if (toggle) {
+                toggle.checked = config.useDeepSeekApi || false;
+                console.log('[DeepSeek] Toggle состояние загружено:', toggle.checked);
+            }
+        }
+    } catch (error) {
+        console.error('[DeepSeek] Ошибка загрузки состояния toggle:', error);
+    }
+}
+
+/**
+ * Переключение между DeepSeek API и локальной Ollama моделью
+ */
+async function toggleDeepSeekApi() {
+    const toggle = document.getElementById('deepseek-api-toggle');
+    const useDeepSeekApi = toggle.checked;
+    
+    console.log('[DeepSeek] Переключение на:', useDeepSeekApi ? 'DeepSeek API' : 'Ollama локально');
+    
+    try {
+        // Загружаем текущую конфигурацию
+        const getResponse = await fetch(`${API_BASE}/api/configuration`);
+        if (!getResponse.ok) {
+            throw new Error('Не удалось загрузить конфигурацию');
+        }
+        
+        const data = await getResponse.json();
+        const config = data.configuration;
+        
+        // Обновляем настройку UseDeepSeekApi на верхнем уровне
+        config.useDeepSeekApi = useDeepSeekApi;
+        
+        // Убеждаемся что секция DeepSeek существует
+        if (!config.deepSeek) {
+            config.deepSeek = {
+                apiKey: 'sk-173a241826d841e390424dfabf177394',
+                baseUrl: 'https://api.deepseek.com',
+                chatModel: 'deepseek-chat',
+                reasonerModel: 'deepseek-reasoner'
+            };
+        }
+        
+        // Сохраняем конфигурацию
+        const saveResponse = await fetch(`${API_BASE}/api/configuration`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                provider: config.provider,
+                useDeepSeekApi: config.useDeepSeekApi,
+                openAI: config.openAI,
+                ollama: config.ollama,
+                deepSeek: config.deepSeek
+            })
+        });
+        
+        if (!saveResponse.ok) {
+            throw new Error('Не удалось сохранить конфигурацию');
+        }
+        
+        console.log('[DeepSeek] Конфигурация успешно сохранена');
+        
+        // Показываем уведомление
+        const message = useDeepSeekApi 
+            ? 'Включен DeepSeek API для чата и reasoning задач' 
+            : 'Используется локальная Ollama модель';
+        
+        showStatusMessage(message, 'success');
+        
+    } catch (error) {
+        console.error('[DeepSeek] Ошибка переключения:', error);
+        alert('Ошибка переключения: ' + error.message);
+        
+        // Возвращаем toggle в предыдущее состояние
+        toggle.checked = !useDeepSeekApi;
+    }
+}
+
+// Загружаем состояние toggle при загрузке страницы
+document.addEventListener('DOMContentLoaded', () => {
+    loadDeepSeekToggleState();
+});
+
+/**
+ * Проверка включен ли DeepSeek API
+ */
+async function isDeepSeekApiEnabled() {
+    try {
+        const response = await fetch(`${API_BASE}/api/configuration`);
+        if (response.ok) {
+            const data = await response.json();
+            return data.configuration?.useDeepSeekApi === true;
+        }
+        return false;
+    } catch (error) {
+        console.error('[Config] Ошибка проверки DeepSeek API:', error);
+        return false;
+    }
+}
+
+/**
+ * Прямое выполнение задач через DeepSeek API
+ */
+async function executeTasksDirect() {
+    console.log('[Tasks] Запуск прямого выполнения задач');
+    
+    if (!currentDialogueId) {
+        alert('Выберите диалог');
+        return;
+    }
+    
+    // Проверяем DeepSeek API
+    const deepSeekEnabled = await isDeepSeekApiEnabled();
+    if (!deepSeekEnabled) {
+        alert('DeepSeek API не включен. Включите toggle "Use DeepSeek API" в настройках.');
+        return;
+    }
+    
+    // Проверяем заполненность контекста
+    const dialogue = dialogues.find(d => d.id === currentDialogueId);
+    if (!dialogue || !dialogue.dialogueGroupId) {
+        alert('Диалог не принадлежит ни одной группе');
+        return;
+    }
+    
+    const group = dialogueGroups.find(g => g.id === dialogue.dialogueGroupId);
+    if (!group) {
+        alert('Группа диалогов не найдена');
+        return;
+    }
+    
+    const missingFields = [];
+    if (!group.requirements || !group.requirements.trim()) {
+        missingFields.push('Требования (requirements.md)');
+    }
+    if (!group.design || !group.design.trim()) {
+        missingFields.push('Проектирование (design.md)');
+    }
+    if (!group.tasks || !group.tasks.trim()) {
+        missingFields.push('Задачи (tasks.md)');
+    }
+    
+    if (missingFields.length > 0) {
+        const fieldsList = missingFields.join('\n• ');
+        alert(`Для выполнения задач необходимо заполнить следующие поля:\n\n• ${fieldsList}\n\nОткройте контекст группы и заполните все поля.`);
+        return;
+    }
+    
+    // Подтверждение от пользователя
+    const confirmed = confirm(
+        'Вы уверены, что хотите выполнить задачи?\n\n' +
+        'DeepSeek API создаст все файлы и папки в текущем проекте.\n\n' +
+        'Это действие может занять несколько минут.'
+    );
+    
+    if (!confirmed) {
+        return;
+    }
+    
+    try {
+        // Отключаем кнопку
+        const executeButton = document.getElementById('execute-tasks-button');
+        if (executeButton) {
+            executeButton.disabled = true;
+        }
+        
+        console.log('[Tasks] Отправка запроса на выполнение задач');
+        
+        const response = await fetch(`${API_BASE}/api/dialogues/${currentDialogueId}/execute-tasks-direct`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[Tasks] Ошибка ответа:', errorText);
+            
+            let errorMessage = 'Ошибка запуска выполнения задач';
+            try {
+                const error = JSON.parse(errorText);
+                errorMessage = error.message || error.title || errorText;
+            } catch {
+                errorMessage = errorText || 'Неизвестная ошибка';
+            }
+            
+            throw new Error(errorMessage);
+        }
+        
+        const result = await response.json();
+        console.log('[Tasks] Выполнение задач запущено:', result);
+        
+        // Показываем уведомление
+        showStatusMessage('Выполнение задач запущено. Следите за прогрессом в чате.', 'success');
+        
+    } catch (error) {
+        console.error('[Tasks] Ошибка запуска выполнения задач:', error);
+        alert('Ошибка запуска выполнения задач: ' + error.message);
+        
+        // Включаем кнопку обратно
+        const executeButton = document.getElementById('execute-tasks-button');
+        if (executeButton) {
+            executeButton.disabled = false;
+        }
+    }
+}
+
+// Привязка обработчиков событий к кнопкам
+document.addEventListener('DOMContentLoaded', () => {
+    // Кнопка "Задачи" (создание плана)
+    const tasksButton = document.getElementById('tasks-button');
+    if (tasksButton) {
+        tasksButton.addEventListener('click', openTaskPanel);
+    }
+    
+    // Кнопка "Выполнить задачи"
+    const executeTasksButton = document.getElementById('execute-tasks-button');
+    if (executeTasksButton) {
+        executeTasksButton.addEventListener('click', executeTasksDirect);
+    }
+    
+    // Кнопка "Удалить план"
+    const deletePlanButton = document.getElementById('delete-plan-button');
+    if (deletePlanButton) {
+        deletePlanButton.addEventListener('click', async () => {
+            if (!currentDialogueId) {
+                alert('Выберите диалог');
+                return;
+            }
+            
+            const confirmed = confirm('Вы уверены, что хотите удалить план задач?');
+            if (!confirmed) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/dialogues/${currentDialogueId}/task-plan`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showStatusMessage('План задач удален', 'success');
+                    closeTaskPanel();
+                    await checkAndShowTasksButton();
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Ошибка удаления плана');
+                }
+            } catch (error) {
+                console.error('[Tasks] Ошибка удаления плана:', error);
+                alert('Ошибка удаления плана: ' + error.message);
+            }
+        });
+    }
+});

@@ -72,6 +72,10 @@ public class PromptProcessorIntegrationTests
         var commandRecognizer = new CommandRecognizer(commandRecognizerLogger);
         var tasksFilePathResolver = new TasksFilePathResolver(pathValidator, tasksFilePathResolverLogger);
         var mockProjectService = new MockProjectManagementService();
+        
+        // Mock оркестратор и configService для тестов
+        var mockOrchestrator = new MockDeepSeekOrchestrator();
+        var mockConfigService = new MockConfigurationService();
 
         // Act - Create PromptProcessor with factory-created service
         var promptProcessor = new PromptProcessor(
@@ -84,7 +88,9 @@ public class PromptProcessorIntegrationTests
             mockProjectService,
             promptProcessorLogger,
             commandRecognizer,
-            tasksFilePathResolver
+            tasksFilePathResolver,
+            mockOrchestrator,
+            mockConfigService
         );
 
         // Assert
@@ -223,6 +229,8 @@ public class PromptProcessorIntegrationTests
         var commandRecognizer1 = new CommandRecognizer(commandRecognizerLogger1);
         var tasksFilePathResolver1 = new TasksFilePathResolver(pathValidator1, tasksFilePathResolverLogger1);
         var mockProjectService1 = new MockProjectManagementService();
+        var mockOrchestrator1 = new MockDeepSeekOrchestrator();
+        var mockConfigService1 = new MockConfigurationService();
         
         var promptProcessor1 = new PromptProcessor(
             dbContext1,
@@ -234,7 +242,9 @@ public class PromptProcessorIntegrationTests
             mockProjectService1,
             promptProcessorLogger,
             commandRecognizer1,
-            tasksFilePathResolver1
+            tasksFilePathResolver1,
+            mockOrchestrator1,
+            mockConfigService1
         );
 
         if (promptProcessor1 == null)
@@ -281,7 +291,9 @@ public class PromptProcessorIntegrationTests
             mockProjectService2,
             promptProcessorLogger,
             commandRecognizer2,
-            tasksFilePathResolver2
+            tasksFilePathResolver2,
+            new MockDeepSeekOrchestrator(),
+            new MockConfigurationService()
         );
 
         if (promptProcessor2 == null)
@@ -525,4 +537,51 @@ class MockProjectManagementService : IProjectManagementService
     public Task<Project> AddProjectAsync(string projectPath) => throw new NotImplementedException();
     public Task DeleteProjectAsync(int projectId) => throw new NotImplementedException();
     public Task SelectProjectAsync(int projectId) => throw new NotImplementedException();
+}
+
+/// <summary>
+/// Mock для IDeepSeekOrchestratorService
+/// </summary>
+class MockDeepSeekOrchestrator : IDeepSeekOrchestratorService
+{
+    public Task<OrchestratorResult> ExecuteTurnAsync(
+        int dialogueId,
+        List<object> messages,
+        List<object> tools,
+        Func<string, string, Task<string>> onToolCall,
+        int maxSubTurns = 15)
+    {
+        // Возвращаем пустой результат для тестов
+        return Task.FromResult(new OrchestratorResult
+        {
+            Success = false,
+            FinalAnswer = "Mock orchestrator",
+            SubTurnsExecuted = 0
+        });
+    }
+}
+
+/// <summary>
+/// Mock для IConfigurationService
+/// </summary>
+class MockConfigurationService : IConfigurationService
+{
+    public Task<LlmConfiguration> GetConfigurationAsync()
+    {
+        return Task.FromResult(new LlmConfiguration
+        {
+            Provider = "Ollama",
+            UseDeepSeekApi = false, // Отключаем DeepSeek API в тестах
+            Ollama = new OllamaSettings
+            {
+                BaseUrl = "http://localhost:11434",
+                Model = "llama3.1:8b",
+                ReasoningModel = "deepseek-r1:7b"
+            }
+        });
+    }
+
+    public Task SaveConfigurationAsync(LlmConfiguration config) => Task.CompletedTask;
+    
+    public Task<bool> ValidateConfigurationAsync(LlmConfiguration config) => Task.FromResult(true);
 }

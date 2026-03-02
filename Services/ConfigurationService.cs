@@ -35,7 +35,8 @@ public class ConfigurationService : IConfigurationService
         {
             var config = new LlmConfiguration
             {
-                Provider = _configuration["Llm:Provider"] ?? "OpenAI"
+                Provider = _configuration["Llm:Provider"] ?? "OpenAI",
+                UseDeepSeekApi = bool.Parse(_configuration["Llm:UseDeepSeekApi"] ?? "false")
             };
 
             // Read OpenAI settings
@@ -59,6 +60,19 @@ public class ConfigurationService : IConfigurationService
                     BaseUrl = ollamaSection["BaseUrl"] ?? string.Empty,
                     Model = ollamaSection["Model"] ?? string.Empty,
                     ReasoningModel = ollamaSection["ReasoningModel"]
+                };
+            }
+
+            // Read DeepSeek settings
+            var deepSeekSection = _configuration.GetSection("Llm:DeepSeek");
+            if (deepSeekSection.Exists())
+            {
+                config.DeepSeek = new DeepSeekSettings
+                {
+                    ApiKey = deepSeekSection["ApiKey"] ?? string.Empty,
+                    BaseUrl = deepSeekSection["BaseUrl"] ?? "https://api.deepseek.com",
+                    ChatModel = deepSeekSection["ChatModel"] ?? "deepseek-chat",
+                    ReasonerModel = deepSeekSection["ReasonerModel"] ?? "deepseek-reasoner"
                 };
             }
 
@@ -113,7 +127,8 @@ public class ConfigurationService : IConfigurationService
             // Build the Llm section
             var llmSection = new Dictionary<string, object?>
             {
-                ["Provider"] = config.Provider
+                ["Provider"] = config.Provider,
+                ["UseDeepSeekApi"] = config.UseDeepSeekApi
             };
 
             // Add OpenAI settings if present
@@ -133,7 +148,20 @@ public class ConfigurationService : IConfigurationService
                 llmSection["Ollama"] = new Dictionary<string, string?>
                 {
                     ["BaseUrl"] = config.Ollama.BaseUrl,
-                    ["Model"] = config.Ollama.Model
+                    ["Model"] = config.Ollama.Model,
+                    ["ReasoningModel"] = config.Ollama.ReasoningModel
+                };
+            }
+
+            // Add DeepSeek settings if present
+            if (config.DeepSeek != null)
+            {
+                llmSection["DeepSeek"] = new Dictionary<string, string?>
+                {
+                    ["ApiKey"] = config.DeepSeek.ApiKey,
+                    ["BaseUrl"] = config.DeepSeek.BaseUrl,
+                    ["ChatModel"] = config.DeepSeek.ChatModel,
+                    ["ReasonerModel"] = config.DeepSeek.ReasonerModel
                 };
             }
 

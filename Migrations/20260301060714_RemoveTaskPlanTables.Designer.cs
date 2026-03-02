@@ -3,6 +3,7 @@ using System;
 using CSharpRefactoringAssistant.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CSharpRefactoringAssistant.Migrations
 {
     [DbContext(typeof(RefactoringDbContext))]
-    partial class RefactoringDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260301060714_RemoveTaskPlanTables")]
+    partial class RemoveTaskPlanTables
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.3");
@@ -156,9 +159,6 @@ namespace CSharpRefactoringAssistant.Migrations
 
                     b.Property<int>("DialogueId")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("ReasoningContent")
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("Role")
                         .IsRequired()

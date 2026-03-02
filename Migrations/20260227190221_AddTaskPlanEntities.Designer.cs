@@ -3,6 +3,7 @@ using System;
 using CSharpRefactoringAssistant.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CSharpRefactoringAssistant.Migrations
 {
     [DbContext(typeof(RefactoringDbContext))]
-    partial class RefactoringDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260227190221_AddTaskPlanEntities")]
+    partial class AddTaskPlanEntities
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.3");
@@ -157,9 +160,6 @@ namespace CSharpRefactoringAssistant.Migrations
                     b.Property<int>("DialogueId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("ReasoningContent")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -172,6 +172,40 @@ namespace CSharpRefactoringAssistant.Migrations
                     b.HasIndex("DialogueId");
 
                     b.ToTable("Messages");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.PlannedTaskEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FoldersJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("OrderIndex")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TaskPlanId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskPlanId");
+
+                    b.ToTable("PlannedTasks");
                 });
 
             modelBuilder.Entity("CSharpRefactoringAssistant.Models.Project", b =>
@@ -202,6 +236,60 @@ namespace CSharpRefactoringAssistant.Migrations
                         .IsUnique();
 
                     b.ToTable("Projects");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.SubTaskEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("OrderIndex")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PlannedTaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlannedTaskId");
+
+                    b.ToTable("SubTasks");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.TaskPlanEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DialogueId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PlanId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DialogueId");
+
+                    b.ToTable("TaskPlans");
                 });
 
             modelBuilder.Entity("CSharpRefactoringAssistant.Models.Checkpoint", b =>
@@ -247,6 +335,39 @@ namespace CSharpRefactoringAssistant.Migrations
                     b.Navigation("Dialogue");
                 });
 
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.PlannedTaskEntity", b =>
+                {
+                    b.HasOne("CSharpRefactoringAssistant.Models.TaskPlanEntity", "TaskPlan")
+                        .WithMany("Tasks")
+                        .HasForeignKey("TaskPlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("TaskPlan");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.SubTaskEntity", b =>
+                {
+                    b.HasOne("CSharpRefactoringAssistant.Models.PlannedTaskEntity", "PlannedTask")
+                        .WithMany("SubTasks")
+                        .HasForeignKey("PlannedTaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PlannedTask");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.TaskPlanEntity", b =>
+                {
+                    b.HasOne("CSharpRefactoringAssistant.Models.Dialogue", "Dialogue")
+                        .WithMany()
+                        .HasForeignKey("DialogueId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Dialogue");
+                });
+
             modelBuilder.Entity("CSharpRefactoringAssistant.Models.Dialogue", b =>
                 {
                     b.Navigation("Checkpoints");
@@ -259,6 +380,16 @@ namespace CSharpRefactoringAssistant.Migrations
             modelBuilder.Entity("CSharpRefactoringAssistant.Models.DialogueGroup", b =>
                 {
                     b.Navigation("Dialogues");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.PlannedTaskEntity", b =>
+                {
+                    b.Navigation("SubTasks");
+                });
+
+            modelBuilder.Entity("CSharpRefactoringAssistant.Models.TaskPlanEntity", b =>
+                {
+                    b.Navigation("Tasks");
                 });
 #pragma warning restore 612, 618
         }

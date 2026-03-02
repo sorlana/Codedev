@@ -1,0 +1,1203 @@
+Детальная инструкция по реализации калькулятора
+Общая структура проекта
+
+Задача 0 (Выполнить)
+Создайте следующую структуру папок и файлов:
+
+text
+calculator/
+├── package.json
+├── README.md
+├── index.html          (будет создан позже)
+├── src/
+│   ├── calculatorEngine.js
+│   ├── inputValidator.js
+│   ├── resultFormatter.js
+│   ├── calculatorController.js
+│   ├── utils/
+│   │   └── result.js    (вспомогательные типы)
+│   └── constants.js
+├── tests/
+│   ├── unit/
+│   │   ├── calculatorEngine.test.js
+│   │   ├── inputValidator.test.js
+│   │   ├── resultFormatter.test.js
+│   │   └── calculatorController.test.js
+│   ├── property/
+│   │   ├── calculatorEngine.property.test.js
+│   │   ├── inputValidator.property.test.js
+│   │   ├── resultFormatter.property.test.js
+│   │   └── calculatorController.property.test.js
+│   └── integration/
+│       └── ui.integration.test.js    (позже)
+└── styles/
+    └── main.css
+
+Задача 1 (Выполнить)
+
+Настройка проекта 
+Файл: package.json
+
+Инициализируйте проект и установите необходимые зависимости:
+
+bash
+npm init -y
+npm install --save-dev jest fast-check @babel/core @babel/preset-env babel-jest
+Настройте Jest для работы с ES-модулями. Создайте файл .babelrc:
+
+json
+{
+  "presets": ["@babel/preset-env"]
+}
+В package.json добавьте скрипты:
+
+json
+"scripts": {
+  "test": "jest",
+  "test:unit": "jest tests/unit",
+  "test:property": "jest tests/property",
+  "test:integration": "jest tests/integration"
+}
+Файл: src/utils/result.js
+
+Реализуйте вспомогательные функции для работы с типом Result (успех/ошибка), как описано в design.txt:
+
+javascript
+// src/utils/result.js
+
+/**
+ * @template T
+ * @template E
+ * @typedef {Object} Success
+ * @property {true} success
+ * @property {T} value
+ */
+
+/**
+ * @template T
+ * @template E
+ * @typedef {Object} Failure
+ * @property {false} success
+ * @property {E} error
+ */
+
+/**
+ * @template T
+ * @template E
+ * @typedef {Success<T, E> | Failure<T, E>} Result
+ */
+
+/**
+ * Создаёт успешный результат
+ * @template T
+ * @param {T} value
+ * @returns {Success<T, never>}
+ */
+export function success(value) {
+  return { success: true, value };
+}
+
+/**
+ * Создаёт результат с ошибкой
+ * @template E
+ * @param {E} error
+ * @returns {Failure<never, E>}
+ */
+export function failure(error) {
+  return { success: false, error };
+}
+
+/**
+ * Проверяет, является ли результат успешным
+ * @template T, E
+ * @param {Result<T, E>} result
+ * @returns {result is Success<T, E>}
+ */
+export function isSuccess(result) {
+  return result.success === true;
+}
+
+/**
+ * Проверяет, является ли результат ошибочным
+ * @template T, E
+ * @param {Result<T, E>} result
+ * @returns {result is Failure<T, E>}
+ */
+export function isFailure(result) {
+  return result.success === false;
+}
+Файл: src/constants.js
+
+Определите перечисление операторов и ошибок (как в design.txt):
+
+javascript
+// src/constants.js
+
+/**
+ * @readonly
+ * @enum {string}
+ */
+export const Operator = {
+  ADD: '+',
+  SUBTRACT: '-',
+  MULTIPLY: '*',
+  DIVIDE: '/',
+};
+
+/**
+ * @readonly
+ * @enum {string}
+ */
+export const CalculatorError = {
+  DIVISION_BY_ZERO: 'Деление на ноль невозможно',
+  INVALID_INPUT: 'Некорректный ввод',
+  INVALID_OPERATOR: 'Неизвестный оператор',
+};
+
+
+Задача 2 (Выполнить)
+
+Реализация вычислительного ядра
+2.1 Создать модуль CalculatorEngine
+Файл: src/calculatorEngine.js
+
+Реализуйте класс или объект с методами для арифметических операций. Используйте Result для обработки деления на ноль.
+
+javascript
+// src/calculatorEngine.js
+
+import { success, failure } from './utils/result.js';
+import { CalculatorError } from './constants.js';
+
+export const CalculatorEngine = {
+  /**
+   * @param {number} a
+   * @param {number} b
+   * @returns {number}
+   */
+  add(a, b) {
+    return a + b;
+  },
+
+  /**
+   * @param {number} a
+   * @param {number} b
+   * @returns {number}
+   */
+  subtract(a, b) {
+    return a - b;
+  },
+
+  /**
+   * @param {number} a
+   * @param {number} b
+   * @returns {number}
+   */
+  multiply(a, b) {
+    return a * b;
+  },
+
+  /**
+   * @param {number} a
+   * @param {number} b
+   * @returns {import('./utils/result.js').Result<number, string>}
+   */
+  divide(a, b) {
+    if (b === 0) {
+      return failure(CalculatorError.DIVISION_BY_ZERO);
+    }
+    return success(a / b);
+  },
+};
+
+2.2 Написать property-тест для арифметических операций (Свойство 1)
+Файл: tests/property/calculatorEngine.property.test.js
+
+javascript
+import fc from 'fast-check';
+import { CalculatorEngine } from '../../src/calculatorEngine.js';
+import { isSuccess } from '../../src/utils/result.js';
+
+describe('Feature: calculator, Property 1: Корректность арифметических операций', () => {
+  test('Сложение a + b должно равняться математической сумме', () => {
+    fc.assert(
+      fc.property(fc.integer(), fc.integer(), (a, b) => {
+        expect(CalculatorEngine.add(a, b)).toBe(a + b);
+      })
+    );
+  });
+
+  test('Вычитание a - b должно равняться математической разности', () => {
+    fc.assert(
+      fc.property(fc.integer(), fc.integer(), (a, b) => {
+        expect(CalculatorEngine.subtract(a, b)).toBe(a - b);
+      })
+    );
+  });
+
+  test('Умножение a * b должно равняться математическому произведению', () => {
+    fc.assert(
+      fc.property(fc.integer(), fc.integer(), (a, b) => {
+        expect(CalculatorEngine.multiply(a, b)).toBe(a * b);
+      })
+    );
+  });
+
+  test('Деление a / b (при b ≠ 0) должно равняться математическому частному', () => {
+    fc.assert(
+      fc.property(fc.integer(), fc.integer(), (a, b) => {
+        fc.pre(b !== 0);
+        const result = CalculatorEngine.divide(a, b);
+        expect(isSuccess(result) && result.value).toBe(a / b);
+      })
+    );
+  });
+});
+2.3 Написать property-тест для деления на ноль (Свойство 2)
+Тот же файл: tests/property/calculatorEngine.property.test.js (можно добавить отдельный тест)
+
+javascript
+test('Деление на ноль всегда возвращает ошибку "Деление на ноль невозможно"', () => {
+  fc.assert(
+    fc.property(fc.integer(), (a) => {
+      const result = CalculatorEngine.divide(a, 0);
+      expect(result).toEqual({
+        success: false,
+        error: 'Деление на ноль невозможно',
+      });
+    })
+  );
+});
+2.4 Написать модульные тесты для граничных случаев
+Файл: tests/unit/calculatorEngine.test.js
+
+javascript
+import { CalculatorEngine } from '../../src/calculatorEngine.js';
+import { isSuccess, isFailure } from '../../src/utils/result.js';
+
+describe('CalculatorEngine unit tests', () => {
+  test('2 + 3 = 5', () => {
+    expect(CalculatorEngine.add(2, 3)).toBe(5);
+  });
+
+  test('10 / 0 возвращает ошибку', () => {
+    const result = CalculatorEngine.divide(10, 0);
+    expect(isFailure(result)).toBe(true);
+    if (isFailure(result)) {
+      expect(result.error).toBe('Деление на ноль невозможно');
+    }
+  });
+
+  test('-5 * 3 = -15', () => {
+    expect(CalculatorEngine.multiply(-5, 3)).toBe(-15);
+  });
+});
+
+Задача 3 (Выполнить)
+
+Реализация валидатора ввода
+3.1 Создать модуль InputValidator
+Файл: src/inputValidator.js
+
+Реализуйте функции валидации чисел и операторов.
+
+javascript
+// src/inputValidator.js
+
+import { success, failure } from './utils/result.js';
+import { Operator, CalculatorError } from './constants.js';
+
+export const InputValidator = {
+  /**
+   * Проверяет, является ли строка корректным числом (целым, десятичным, отрицательным)
+   * @param {string} input
+   * @returns {import('./utils/result.js').Result<number, string>}
+   */
+  validateNumber(input) {
+    // Удаляем пробелы по краям
+    const trimmed = input.trim();
+    if (trimmed === '') {
+      return failure(CalculatorError.INVALID_INPUT);
+    }
+    const num = Number(trimmed);
+    // Проверяем, что получилось конечное число (не NaN, не Infinity)
+    if (isNaN(num) || !isFinite(num)) {
+      return failure(CalculatorError.INVALID_INPUT);
+    }
+    return success(num);
+  },
+
+  /**
+   * Проверяет, является ли строка одним из поддерживаемых операторов
+   * @param {string} input
+   * @returns {import('./utils/result.js').Result<string, string>}
+   */
+  validateOperator(input) {
+    const trimmed = input.trim();
+    if (Object.values(Operator).includes(trimmed)) {
+      return success(trimmed);
+    }
+    return failure(CalculatorError.INVALID_OPERATOR);
+  },
+};
+3.2 Написать property-тест для валидации корректных чисел (Свойство 3)
+Файл: tests/property/inputValidator.property.test.js
+
+javascript
+import fc from 'fast-check';
+import { InputValidator } from '../../src/inputValidator.js';
+import { isSuccess } from '../../src/utils/result.js';
+
+describe('Feature: calculator, Property 3: Валидация корректных чисел', () => {
+  test('Любое корректное число (целое, десятичное, отрицательное) должно успешно преобразовываться', () => {
+    fc.assert(
+      fc.property(fc.oneof(fc.integer(), fc.float()), (num) => {
+        const str = num.toString();
+        const result = InputValidator.validateNumber(str);
+        expect(isSuccess(result)).toBe(true);
+        if (isSuccess(result)) {
+          expect(result.value).toBeCloseTo(num, 10); // допускаем погрешность float
+        }
+      })
+    );
+  });
+});
+3.3 Написать property-тест для отклонения некорректного ввода (Свойство 4)
+Тот же файл:
+
+javascript
+import { CalculatorError } from '../../src/constants.js';
+
+describe('Feature: calculator, Property 4: Отклонение некорректного ввода', () => {
+  test('Строки, не являющиеся числами, должны возвращать ошибку "Некорректный ввод"', () => {
+    fc.assert(
+      fc.property(
+        fc.oneof(
+          fc.string({ minLength: 1 }).filter(s => isNaN(Number(s.trim())) || s.trim() === ''),
+          fc.constantFrom('abc', '--123', '12 34', '1e1000', 'NaN', 'Infinity')
+        ),
+        (invalidInput) => {
+          const result = InputValidator.validateNumber(invalidInput);
+          expect(result).toEqual({
+            success: false,
+            error: CalculatorError.INVALID_INPUT,
+          });
+        }
+      )
+    );
+  });
+});
+3.4 Написать модульные тесты для специфических случаев
+Файл: tests/unit/inputValidator.test.js
+
+javascript
+import { InputValidator } from '../../src/inputValidator.js';
+import { isSuccess, isFailure } from '../../src/utils/result.js';
+import { Operator, CalculatorError } from '../../src/constants.js';
+
+describe('InputValidator unit tests', () => {
+  test('"123" → 123', () => {
+    const result = InputValidator.validateNumber('123');
+    expect(isSuccess(result) && result.value).toBe(123);
+  });
+
+  test('"-45.67" → -45.67', () => {
+    const result = InputValidator.validateNumber('-45.67');
+    expect(isSuccess(result) && result.value).toBeCloseTo(-45.67, 10);
+  });
+
+  test('"abc" → ошибка', () => {
+    const result = InputValidator.validateNumber('abc');
+    expect(isFailure(result) && result.error).toBe(CalculatorError.INVALID_INPUT);
+  });
+
+  test('Валидация оператора: "+" → success', () => {
+    const result = InputValidator.validateOperator('+');
+    expect(isSuccess(result) && result.value).toBe(Operator.ADD);
+  });
+
+  test('Валидация оператора: "x" → ошибка', () => {
+    const result = InputValidator.validateOperator('x');
+    expect(isFailure(result) && result.error).toBe(CalculatorError.INVALID_OPERATOR);
+  });
+});
+
+Задача 4 (Выполнить)
+
+Контрольная точка
+Запустите все тесты:
+
+bash
+npm test
+Убедитесь, что все тесты проходят. Если возникнут ошибки, исправьте их перед продолжением.
+
+Задача 5 (Выполнить) 
+
+Реализация форматтера результатов
+5.1 Создать модуль ResultFormatter
+Файл: src/resultFormatter.js
+
+Реализуйте форматирование чисел и ошибок.
+
+javascript
+// src/resultFormatter.js
+
+import { CalculatorError } from './constants.js';
+
+export const ResultFormatter = {
+  /**
+   * Форматирует число для отображения.
+   * Целые числа выводятся без десятичной точки.
+   * Десятичные числа округляются до 10 знаков после запятой.
+   * @param {number} value
+   * @returns {string}
+   */
+  formatNumber(value) {
+    // Проверяем, является ли число целым (в пределах точности)
+    if (Number.isInteger(value)) {
+      return value.toString();
+    }
+    // Ограничиваем до 10 знаков после запятой, убирая лишние нули
+    return value.toFixed(10).replace(/\.?0+$/, '');
+  },
+
+  /**
+   * Преобразует ошибку в понятное пользователю сообщение.
+   * @param {Error|string} error
+   * @returns {string}
+   */
+  formatError(error) {
+    if (typeof error === 'string') {
+      return error;
+    }
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return String(error);
+  },
+};
+5.2 Написать property-тест для форматирования результатов (Свойство 5)
+Файл: tests/property/resultFormatter.property.test.js
+
+javascript
+import fc from 'fast-check';
+import { ResultFormatter } from '../../src/resultFormatter.js';
+
+describe('Feature: calculator, Property 5: Форматирование результатов', () => {
+  test('Для целого числа форматированная строка не должна содержать десятичную точку', () => {
+    fc.assert(
+      fc.property(fc.integer(), (num) => {
+        const formatted = ResultFormatter.formatNumber(num);
+        expect(formatted).not.toContain('.');
+      })
+    );
+  });
+
+  test('Для десятичного числа форматированная строка должна содержать не более 10 знаков после запятой', () => {
+    fc.assert(
+      fc.property(fc.float(), (num) => {
+        // Пропускаем целые числа (они будут отформатированы без точки)
+        fc.pre(!Number.isInteger(num));
+        const formatted = ResultFormatter.formatNumber(num);
+        const parts = formatted.split('.');
+        if (parts.length > 1) {
+          expect(parts[1].length).toBeLessThanOrEqual(10);
+        }
+      })
+    );
+  });
+});
+5.3 Написать property-тест для отображения ошибок (Свойство 6)
+Тот же файл:
+
+javascript
+import { CalculatorError } from '../../src/constants.js';
+
+test('Любая ошибка форматируется в понятную строку', () => {
+  fc.assert(
+    fc.property(
+      fc.oneof(
+        fc.constant(CalculatorError.DIVISION_BY_ZERO),
+        fc.constant(CalculatorError.INVALID_INPUT),
+        fc.constant(CalculatorError.INVALID_OPERATOR),
+        fc.string()
+      ),
+      (err) => {
+        const formatted = ResultFormatter.formatError(err);
+        expect(typeof formatted).toBe('string');
+        expect(formatted.length).toBeGreaterThan(0);
+      }
+    )
+  );
+});
+5.4 Написать модульные тесты для форматирования
+Файл: tests/unit/resultFormatter.test.js
+
+javascript
+import { ResultFormatter } from '../../src/resultFormatter.js';
+import { CalculatorError } from '../../src/constants.js';
+
+describe('ResultFormatter unit tests', () => {
+  test('5.0 → "5"', () => {
+    expect(ResultFormatter.formatNumber(5.0)).toBe('5');
+  });
+
+  test('3.14159265359 → "3.1415926536" (макс. 10 знаков)', () => {
+    expect(ResultFormatter.formatNumber(3.14159265359)).toBe('3.1415926536');
+  });
+
+  test('ошибка деления на ноль → "Деление на ноль невозможно"', () => {
+    expect(ResultFormatter.formatError(CalculatorError.DIVISION_BY_ZERO)).toBe(
+      CalculatorError.DIVISION_BY_ZERO
+    );
+  });
+});
+
+Задача 6  (Выполнить)
+
+Реализация контроллера калькулятора
+6.1 Создать модуль CalculatorController
+Файл: src/calculatorController.js
+
+Контроллер управляет состоянием калькулятора, координирует валидатор, движок и форматтер.
+
+javascript
+// src/calculatorController.js
+
+import { CalculatorEngine } from './calculatorEngine.js';
+import { InputValidator } from './inputValidator.js';
+import { ResultFormatter } from './resultFormatter.js';
+import { isSuccess, isFailure } from './utils/result.js';
+import { Operator } from './constants.js';
+
+/**
+ * @typedef {Object} CalculatorState
+ * @property {number|null} currentValue
+ * @property {number|null} previousValue
+ * @property {string|null} operator
+ * @property {string} displayValue
+ * @property {boolean} waitingForOperand
+ */
+
+export class CalculatorController {
+  constructor() {
+    this.state = this.getInitialState();
+  }
+
+  /**
+   * @private
+   * @returns {CalculatorState}
+   */
+  getInitialState() {
+    return {
+      currentValue: null,
+      previousValue: null,
+      operator: null,
+      displayValue: '0',
+      waitingForOperand: true,
+    };
+  }
+
+  /**
+   * Обрабатывает ввод пользователя (цифры, операторы, команды)
+   * @param {string} input
+   */
+  processInput(input) {
+    // Если ввод - оператор
+    const opResult = InputValidator.validateOperator(input);
+    if (isSuccess(opResult)) {
+      this.handleOperator(opResult.value);
+      return;
+    }
+
+    // Если ввод - число
+    const numResult = InputValidator.validateNumber(input);
+    if (isSuccess(numResult)) {
+      this.handleNumber(numResult.value);
+      return;
+    }
+
+    // Если ввод - специальная команда (например, "C" или "=")
+    if (input === 'C') {
+      this.clear();
+      return;
+    }
+    if (input === '=') {
+      this.calculate();
+      return;
+    }
+
+    // Неизвестный ввод
+    this.state.displayValue = ResultFormatter.formatError('Неизвестная команда');
+  }
+
+  /**
+   * @private
+   * @param {number} num
+   */
+  handleNumber(num) {
+    if (this.state.waitingForOperand) {
+      this.state.currentValue = num;
+      this.state.waitingForOperand = false;
+    } else {
+      // Если уже есть текущее значение, конкатенируем цифры? 
+      // В простом калькуляторе обычно каждое нажатие цифры заменяет текущее значение.
+      // Здесь мы будем считать, что ввод числа всегда задаёт новое значение.
+      // Для простоты: если не ждём операнд, значит текущее значение уже установлено,
+      // и новое число должно начать новое вычисление? 
+      // По требованиям: "КОГДА пользователь вводит новое число после получения результата, 
+      // Калькулятор ДОЛЖЕН начать новое вычисление". Поэтому проверяем:
+      if (this.state.previousValue !== null && this.state.operator === null) {
+        // Это случай, когда только что получили результат (previousValue хранит результат, operator null)
+        this.clear(); // начинаем новое вычисление
+        this.state.currentValue = num;
+        this.state.waitingForOperand = false;
+      } else {
+        // Обычный ввод цифр: заменяем текущее значение
+        this.state.currentValue = num;
+      }
+    }
+    this.updateDisplayFromCurrent();
+  }
+
+  /**
+   * @private
+   * @param {string} op
+   */
+  handleOperator(op) {
+    // Если уже есть оператор и текущее значение, выполняем предыдущую операцию
+    if (this.state.operator !== null && this.state.currentValue !== null && !this.state.waitingForOperand) {
+      this.calculate();
+    }
+    // Сохраняем оператор и предыдущее значение
+    this.state.operator = op;
+    if (this.state.currentValue !== null) {
+      this.state.previousValue = this.state.currentValue;
+      this.state.currentValue = null;
+      this.state.waitingForOperand = true;
+    }
+  }
+
+  /**
+   * Выполняет вычисление на основе текущего состояния
+   */
+  calculate() {
+    if (this.state.operator === null || this.state.previousValue === null || this.state.currentValue === null) {
+      // Недостаточно операндов — ничего не делаем
+      return;
+    }
+
+    let result;
+    const a = this.state.previousValue;
+    const b = this.state.currentValue;
+
+    switch (this.state.operator) {
+      case Operator.ADD:
+        result = CalculatorEngine.add(a, b);
+        break;
+      case Operator.SUBTRACT:
+        result = CalculatorEngine.subtract(a, b);
+        break;
+      case Operator.MULTIPLY:
+        result = CalculatorEngine.multiply(a, b);
+        break;
+      case Operator.DIVIDE: {
+        const divResult = CalculatorEngine.divide(a, b);
+        if (isFailure(divResult)) {
+          this.state.displayValue = ResultFormatter.formatError(divResult.error);
+          // Сохраняем состояние (предыдущее значение и оператор не сбрасываем? По требованию: "сохранить предыдущее корректное состояние")
+          // Здесь мы не изменяем состояние, просто показываем ошибку.
+          return;
+        }
+        result = divResult.value;
+        break;
+      }
+      default:
+        this.state.displayValue = ResultFormatter.formatError('Неизвестный оператор');
+        return;
+    }
+
+    // Успешное вычисление
+    this.state.previousValue = result;
+    this.state.currentValue = null;
+    this.state.operator = null;
+    this.state.waitingForOperand = true;
+    this.state.displayValue = ResultFormatter.formatNumber(result);
+  }
+
+  /**
+   * Сбрасывает состояние калькулятора
+   */
+  clear() {
+    this.state = this.getInitialState();
+  }
+
+  /**
+   * Возвращает строку для отображения на дисплее
+   * @returns {string}
+   */
+  getCurrentDisplay() {
+    return this.state.displayValue;
+  }
+
+  /**
+   * @private
+   */
+  updateDisplayFromCurrent() {
+    if (this.state.currentValue !== null) {
+      this.state.displayValue = ResultFormatter.formatNumber(this.state.currentValue);
+    }
+  }
+}
+6.2 Написать property-тест для сброса состояния (Свойство 7)
+Файл: tests/property/calculatorController.property.test.js
+
+javascript
+import fc from 'fast-check';
+import { CalculatorController } from '../../src/calculatorController.js';
+
+describe('Feature: calculator, Property 7: Полный сброс состояния', () => {
+  test('После вызова clear() все поля сбрасываются, дисплей показывает "0"', () => {
+    fc.assert(
+      fc.property(
+        fc.oneof(fc.integer(), fc.string()), // любой ввод, чтобы изменить состояние
+        (anyInput) => {
+          const controller = new CalculatorController();
+          // Изменяем состояние, передавая случайный ввод (может быть невалидным, но это нормально)
+          controller.processInput(anyInput.toString());
+          controller.clear();
+          const state = controller.state; // для проверки инкапсуляции, если нужно, можно сделать геттер, но здесь просто для теста
+          expect(state.currentValue).toBeNull();
+          expect(state.previousValue).toBeNull();
+          expect(state.operator).toBeNull();
+          expect(state.displayValue).toBe('0');
+          expect(state.waitingForOperand).toBe(true);
+        }
+      )
+    );
+  });
+});
+6.3 Написать property-тест для цепочки операций (Свойство 8)
+Тот же файл:
+
+javascript
+import { Operator } from '../../src/constants.js';
+
+describe('Feature: calculator, Property 8: Цепочка операций', () => {
+  test('Последовательность операций вычисляется слева направо, результат предыдущей становится первым операндом', () => {
+    fc.assert(
+      fc.property(
+        fc.integer(),
+        fc.integer(),
+        fc.integer(),
+        fc.constantFrom(...Object.values(Operator)),
+        fc.constantFrom(...Object.values(Operator)),
+        (a, b, c, op1, op2) => {
+          // Пропускаем деление на ноль во втором операнде для простоты теста
+          fc.pre(!(op1 === Operator.DIVIDE && b === 0));
+          fc.pre(!(op2 === Operator.DIVIDE && c === 0));
+
+          const controller = new CalculatorController();
+          
+          // Вводим a
+          controller.processInput(a.toString());
+          // Вводим оператор op1
+          controller.processInput(op1);
+          // Вводим b
+          controller.processInput(b.toString());
+          // Вычисляем первый шаг (обычно равно не требуется, но для простоты нажмём равно)
+          controller.calculate(); // теперь результат a op1 b должен быть в previousValue
+
+          // Затем вводим оператор op2
+          controller.processInput(op2);
+          // Вводим c
+          controller.processInput(c.toString());
+          // Вычисляем
+          controller.calculate();
+
+          // Ручное вычисление ожидаемого результата
+          let firstResult;
+          switch (op1) {
+            case Operator.ADD: firstResult = a + b; break;
+            case Operator.SUBTRACT: firstResult = a - b; break;
+            case Operator.MULTIPLY: firstResult = a * b; break;
+            case Operator.DIVIDE: firstResult = a / b; break;
+          }
+          let expected;
+          switch (op2) {
+            case Operator.ADD: expected = firstResult + c; break;
+            case Operator.SUBTRACT: expected = firstResult - c; break;
+            case Operator.MULTIPLY: expected = firstResult * c; break;
+            case Operator.DIVIDE: expected = firstResult / c; break;
+          }
+
+          const display = controller.getCurrentDisplay();
+          // Сравниваем с учётом форматирования
+          expect(parseFloat(display)).toBeCloseTo(expected, 10);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+});
+6.4 Написать property-тест для начала нового вычисления (Свойство 9)
+Тот же файл:
+
+javascript
+test('После получения результата ввод нового числа начинает новое вычисление', () => {
+  fc.assert(
+    fc.property(
+      fc.integer(),
+      fc.integer(),
+      fc.constantFrom(...Object.values(Operator)),
+      fc.integer(),
+      (a, b, op, newNum) => {
+        fc.pre(!(op === Operator.DIVIDE && b === 0));
+
+        const controller = new CalculatorController();
+        controller.processInput(a.toString());
+        controller.processInput(op);
+        controller.processInput(b.toString());
+        controller.calculate(); // теперь на дисплее результат
+
+        const oldResult = parseFloat(controller.getCurrentDisplay());
+
+        // Вводим новое число
+        controller.processInput(newNum.toString());
+
+        // Дисплей должен показывать newNum, а не продолжать цепочку
+        expect(controller.getCurrentDisplay()).toBe(ResultFormatter.formatNumber(newNum));
+
+        // Если теперь ввести оператор и другое число, вычисление должно быть newNum op ...
+        // Но это необязательно проверять в этом свойстве
+      }
+    )
+  );
+});
+Примечание: для этого теста понадобится импортировать ResultFormatter в тест.
+
+6.5 Написать модульные тесты для контроллера
+Файл: tests/unit/calculatorController.test.js
+
+javascript
+import { CalculatorController } from '../../src/calculatorController.js';
+import { ResultFormatter } from '../../src/resultFormatter.js';
+import { CalculatorError } from '../../src/constants.js';
+
+describe('CalculatorController unit tests', () => {
+  test('Последовательность "5 + 3 * 2" должна дать 16 (слева направо)', () => {
+    const controller = new CalculatorController();
+    controller.processInput('5');
+    controller.processInput('+');
+    controller.processInput('3');
+    controller.processInput('*');
+    controller.processInput('2');
+    controller.calculate();
+    expect(controller.getCurrentDisplay()).toBe('16');
+  });
+
+  test('Очистка после ошибки восстанавливает работоспособность', () => {
+    const controller = new CalculatorController();
+    controller.processInput('10');
+    controller.processInput('/');
+    controller.processInput('0');
+    controller.calculate();
+    expect(controller.getCurrentDisplay()).toBe(CalculatorError.DIVISION_BY_ZERO);
+
+    controller.clear();
+    expect(controller.getCurrentDisplay()).toBe('0');
+
+    controller.processInput('2');
+    controller.processInput('+');
+    controller.processInput('3');
+    controller.calculate();
+    expect(controller.getCurrentDisplay()).toBe('5');
+  });
+
+  test('Ввод нового числа после результата начинает новое вычисление', () => {
+    const controller = new CalculatorController();
+    controller.processInput('5');
+    controller.processInput('+');
+    controller.processInput('3');
+    controller.calculate();
+    expect(controller.getCurrentDisplay()).toBe('8');
+
+    controller.processInput('2');
+    expect(controller.getCurrentDisplay()).toBe('2');
+    controller.processInput('*');
+    controller.processInput('4');
+    controller.calculate();
+    expect(controller.getCurrentDisplay()).toBe('8'); // 2 * 4 = 8
+  });
+});
+
+Задача 7 (Выполнить) 
+
+Контрольная точка
+Запустите все тесты:
+
+bash
+npm test
+Убедитесь, что все тесты проходят.
+
+Задача 8 (Выполнить) 
+
+Создание простого пользовательского интерфейса
+8.1 Создать HTML-интерфейс
+Файл: index.html
+
+html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Калькулятор</title>
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+  <div class="calculator">
+    <div class="display" id="display">0</div>
+    <div class="buttons">
+      <button class="digit" data-value="7">7</button>
+      <button class="digit" data-value="8">8</button>
+      <button class="digit" data-value="9">9</button>
+      <button class="operator" data-value="/">/</button>
+
+      <button class="digit" data-value="4">4</button>
+      <button class="digit" data-value="5">5</button>
+      <button class="digit" data-value="6">6</button>
+      <button class="operator" data-value="*">*</button>
+
+      <button class="digit" data-value="1">1</button>
+      <button class="digit" data-value="2">2</button>
+      <button class="digit" data-value="3">3</button>
+      <button class="operator" data-value="-">-</button>
+
+      <button class="digit" data-value="0">0</button>
+      <button class="digit" data-value=".">.</button>
+      <button class="command" data-value="C">C</button>
+      <button class="operator" data-value="+">+</button>
+
+      <button class="command equals" data-value="=">=</button>
+    </div>
+  </div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
+8.2 Подключить контроллер к UI
+Файл: src/main.js
+
+javascript
+import { CalculatorController } from './calculatorController.js';
+
+const controller = new CalculatorController();
+const displayEl = document.getElementById('display');
+
+// Функция обновления дисплея
+function updateDisplay() {
+  displayEl.textContent = controller.getCurrentDisplay();
+}
+
+// Обработчики кнопок
+document.querySelectorAll('.digit').forEach(btn => {
+  btn.addEventListener('click', () => {
+    controller.processInput(btn.dataset.value);
+    updateDisplay();
+  });
+});
+
+document.querySelectorAll('.operator').forEach(btn => {
+  btn.addEventListener('click', () => {
+    controller.processInput(btn.dataset.value);
+    updateDisplay();
+  });
+});
+
+document.querySelectorAll('.command').forEach(btn => {
+  btn.addEventListener('click', () => {
+    controller.processInput(btn.dataset.value);
+    updateDisplay();
+  });
+});
+
+// Инициализация
+updateDisplay();
+8.3 Написать интеграционные тесты для UI
+Для интеграционных тестов можно использовать библиотеку jsdom и simulate events.
+
+Файл: tests/integration/ui.integration.test.js
+
+javascript
+/**
+ * @jest-environment jsdom
+ */
+
+import { fireEvent } from '@testing-library/dom';
+import fs from 'fs';
+import path from 'path';
+
+// Загружаем HTML
+const html = fs.readFileSync(path.resolve(__dirname, '../../index.html'), 'utf8');
+
+describe('UI Integration', () => {
+  beforeEach(() => {
+    document.body.innerHTML = html;
+    // Импортируем main.js (он должен быть в виде модуля, но для тестов можно загрузить через require,
+    // однако проще будет создать отдельный тестовый экземпляр контроллера и моки.
+    // Для простоты мы будем тестировать через глобальный объект, но main.js использует import.
+    // Поэтому в тестах лучше создать новый экземпляр контроллера и вручную связать с DOM.
+    // Но для настоящего интеграционного теста нужно, чтобы скрипт выполнился.
+    // Можно использовать require, но поскольку main.js использует type="module", в тестах его надо импортировать динамически.
+    // Для упрощения предположим, что мы написали тесты, проверяющие через симуляцию кликов и проверку дисплея.
+    // Реализуем это, создав контроллер в тесте и привязав его кнопкам.
+    const { CalculatorController } = require('../../src/calculatorController.js');
+    const controller = new CalculatorController();
+    const displayEl = document.getElementById('display');
+    displayEl.textContent = controller.getCurrentDisplay();
+
+    // Назначаем обработчики как в main.js, но с использованием контроллера из теста
+    document.querySelectorAll('.digit, .operator, .command').forEach(btn => {
+      btn.addEventListener('click', () => {
+        controller.processInput(btn.dataset.value);
+        displayEl.textContent = controller.getCurrentDisplay();
+      });
+    });
+  });
+
+  test('Клик по кнопкам "2", "+", "3", "=" отображает "5"', () => {
+    fireEvent.click(document.querySelector('[data-value="2"]'));
+    fireEvent.click(document.querySelector('[data-value="+"]'));
+    fireEvent.click(document.querySelector('[data-value="3"]'));
+    fireEvent.click(document.querySelector('[data-value="="]'));
+    expect(document.getElementById('display').textContent).toBe('5');
+  });
+
+  test('Клик по "C" очищает дисплей', () => {
+    fireEvent.click(document.querySelector('[data-value="5"]'));
+    fireEvent.click(document.querySelector('[data-value="+"]'));
+    fireEvent.click(document.querySelector('[data-value="3"]'));
+    fireEvent.click(document.querySelector('[data-value="C"]'));
+    expect(document.getElementById('display').textContent).toBe('0');
+  });
+
+  test('Попытка деления на ноль показывает сообщение об ошибке', () => {
+    fireEvent.click(document.querySelector('[data-value="1"]'));
+    fireEvent.click(document.querySelector('[data-value="0"]'));
+    fireEvent.click(document.querySelector('[data-value="/"]'));
+    fireEvent.click(document.querySelector('[data-value="0"]'));
+    fireEvent.click(document.querySelector('[data-value="="]'));
+    expect(document.getElementById('display').textContent).toBe('Деление на ноль невозможно');
+  });
+});
+Примечание: для работы тестов с jsdom установите jest-environment-jsdom и @testing-library/dom.
+
+Задача 9 (Выполнить)
+
+Финальная интеграция и полировка
+9.1 Добавить стили CSS
+Файл: styles/main.css
+
+css
+body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #f0f0f0;
+  font-family: Arial, sans-serif;
+}
+
+.calculator {
+  width: 300px;
+  background-color: #333;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+
+.display {
+  background-color: #222;
+  color: #0f0;
+  font-size: 2rem;
+  text-align: right;
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+
+.buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+button {
+  padding: 15px;
+  font-size: 1.2rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background-color: #444;
+  color: white;
+  transition: background-color 0.2s;
+}
+
+button:hover {
+  background-color: #555;
+}
+
+.operator {
+  background-color: #f90;
+}
+
+.operator:hover {
+  background-color: #fa0;
+}
+
+.equals {
+  grid-column: span 4;
+  background-color: #28a;
+}
+
+.equals:hover {
+  background-color: #3af;
+}
+
+.command {
+  background-color: #c00;
+}
+
+.command:hover {
+  background-color: #d22;
+}
+9.2 Создать README
+Файл: README.md
+
+markdown
+# Простой калькулятор
+
+Реализация калькулятора на JavaScript с модульной архитектурой, покрытием тестами (unit + property-based) и веб-интерфейсом.
+
+## Функциональность
+
+- Базовые арифметические операции: +, -, *, /
+- Обработка ошибок (деление на ноль, некорректный ввод)
+- Ввод целых, десятичных и отрицательных чисел
+- Отображение результатов с разумным форматированием
+- Очистка (C)
+- Последовательные вычисления слева направо
+
+## Запуск
+
+1. Установите зависимости:
+   ```bash
+   npm install
+Запустите тесты:
+
+bash
+npm test          # все тесты
+npm run test:unit # только модульные
+npm run test:property # property-based
+npm run test:integration # интеграционные

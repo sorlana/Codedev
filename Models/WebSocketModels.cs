@@ -35,6 +35,7 @@ public static class WebSocketMessageTypes
     public const string ConnectionAck = "connection_ack";
     public const string Ping = "ping";
     public const string Pong = "pong";
+    public const string TaskProgress = "task_progress";
 }
 
 /// <summary>
@@ -124,4 +125,46 @@ public class UserMessagePayload
     /// Содержимое сообщения пользователя
     /// </summary>
     public string Content { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Полезная нагрузка для прогресса генерации плана
+/// </summary>
+public class PlanGenerationProgressPayload
+{
+    /// <summary>
+    /// Текущий номер файла
+    /// </summary>
+    public int Current { get; set; }
+    
+    /// <summary>
+    /// Общее количество файлов
+    /// </summary>
+    public int Total { get; set; }
+    
+    /// <summary>
+    /// Сообщение о прогрессе
+    /// </summary>
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Полезная нагрузка для прогресса выполнения задач
+/// </summary>
+public class TaskExecutionProgressPayload
+{
+    /// <summary>
+    /// Текущий номер элемента
+    /// </summary>
+    public int Current { get; set; }
+    
+    /// <summary>
+    /// Общее количество элементов
+    /// </summary>
+    public int Total { get; set; }
+    
+    /// <summary>
+    /// Сообщение о прогрессе
+    /// </summary>
+    public string Message { get; set; } = string.Empty;
 }

@@ -219,7 +219,7 @@ public class TaskExecutorManualTests
             return Task.FromResult("Mock response");
         }
         
-        public List<CSharpRefactoringAssistant.Models.FunctionDefinition> GetAvailableTools()
+        public List<CSharpRefactoringAssistant.Models.FunctionDefinition> GetAvailableTools(string? projectPath = null)
         {
             return new List<CSharpRefactoringAssistant.Models.FunctionDefinition>();
         }

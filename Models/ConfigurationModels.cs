@@ -11,6 +11,11 @@ public class LlmConfiguration
     public string Provider { get; set; } = string.Empty;
     
     /// <summary>
+    /// Use DeepSeek API instead of local Ollama (applies globally)
+    /// </summary>
+    public bool UseDeepSeekApi { get; set; } = false;
+    
+    /// <summary>
     /// Settings for OpenAI-compatible providers (F5AI, DeepSeek, etc.)
     /// </summary>
     public ProviderSettings? OpenAI { get; set; }
@@ -19,6 +24,11 @@ public class LlmConfiguration
     /// Settings for local Ollama installations
     /// </summary>
     public OllamaSettings? Ollama { get; set; }
+    
+    /// <summary>
+    /// Settings for DeepSeek API
+    /// </summary>
+    public DeepSeekSettings? DeepSeek { get; set; }
 }
 
 /// <summary>
@@ -65,6 +75,32 @@ public class OllamaSettings
 }
 
 /// <summary>
+/// Settings for DeepSeek API.
+/// </summary>
+public class DeepSeekSettings
+{
+    /// <summary>
+    /// DeepSeek API key
+    /// </summary>
+    public string ApiKey { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Base URL for DeepSeek API (default: "https://api.deepseek.com")
+    /// </summary>
+    public string BaseUrl { get; set; } = "https://api.deepseek.com";
+    
+    /// <summary>
+    /// Model for chat (default: "deepseek-chat")
+    /// </summary>
+    public string ChatModel { get; set; } = "deepseek-chat";
+    
+    /// <summary>
+    /// Model for reasoning/planning (default: "deepseek-reasoner")
+    /// </summary>
+    public string ReasonerModel { get; set; } = "deepseek-reasoner";
+}
+
+/// <summary>
 /// Request model for saving configuration.
 /// </summary>
 public class SaveConfigurationRequest
@@ -75,6 +111,11 @@ public class SaveConfigurationRequest
     public string Provider { get; set; } = string.Empty;
     
     /// <summary>
+    /// Use DeepSeek API instead of local Ollama
+    /// </summary>
+    public bool? UseDeepSeekApi { get; set; }
+    
+    /// <summary>
     /// Settings for OpenAI-compatible providers
     /// </summary>
     public ProviderSettings? OpenAI { get; set; }
@@ -83,6 +124,11 @@ public class SaveConfigurationRequest
     /// Settings for local Ollama installations
     /// </summary>
     public OllamaSettings? Ollama { get; set; }
+    
+    /// <summary>
+    /// Settings for DeepSeek API
+    /// </summary>
+    public DeepSeekSettings? DeepSeek { get; set; }
 }
 
 /// <summary>

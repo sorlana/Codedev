@@ -29,10 +29,16 @@ public class ReasoningService : IReasoningService
         var config = await _configService.GetConfigurationAsync();
         
         // Проверяем, настроена ли reasoning модель
-        if (config.Provider != "Ollama" || string.IsNullOrEmpty(config.Ollama?.ReasoningModel))
+        if (config.Provider != "Ollama")
         {
-            _logger.LogWarning("Reasoning модель не настроена, используется обычная модель");
-            return taskDescription; // Возвращаем исходное описание без изменений
+            _logger.LogWarning("Reasoning модель доступна только для провайдера Ollama");
+            return taskDescription;
+        }
+
+        if (config.Ollama == null)
+        {
+            _logger.LogWarning("Настройки Ollama не найдены");
+            return taskDescription;
         }
 
         try
@@ -40,11 +46,31 @@ public class ReasoningService : IReasoningService
             // Создаём промпт для reasoning модели
             var prompt = BuildReasoningPrompt(taskDescription, projectPath);
             
-            // Вызываем reasoning модель через Ollama API
-            var plan = await CallReasoningModelAsync(
-                config.Ollama.BaseUrl, 
-                config.Ollama.ReasoningModel, 
-                prompt);
+            string plan;
+            
+            // Проверяем, использовать ли DeepSeek API
+            if (config.UseDeepSeekApi && config.DeepSeek != null && !string.IsNullOrEmpty(config.DeepSeek.ApiKey))
+            {
+                _logger.LogInformation("Используется DeepSeek API для reasoning");
+                plan = await CallDeepSeekApiAsync(
+                    config.DeepSeek.ApiKey, 
+                    config.DeepSeek.BaseUrl,
+                    config.DeepSeek.ReasonerModel,
+                    prompt);
+            }
+            else if (config.Ollama != null && !string.IsNullOrEmpty(config.Ollama.ReasoningModel))
+            {
+                _logger.LogInformation("Используется локальная Ollama модель {Model} для reasoning", config.Ollama.ReasoningModel);
+                plan = await CallOllamaReasoningModelAsync(
+                    config.Ollama.BaseUrl, 
+                    config.Ollama.ReasoningModel, 
+                    prompt);
+            }
+            else
+            {
+                _logger.LogWarning("Reasoning модель не настроена");
+                return taskDescription;
+            }
             
             _logger.LogInformation("План задачи успешно создан, длина: {Length} символов", plan.Length);
             
@@ -116,7 +142,7 @@ public class ReasoningService : IReasoningService
     /// <summary>
     /// Вызывает reasoning модель через Ollama API
     /// </summary>
-    private async Task<string> CallReasoningModelAsync(string baseUrl, string model, string prompt)
+    private async Task<string> CallOllamaReasoningModelAsync(string baseUrl, string model, string prompt)
     {
         using var httpClient = new HttpClient();
         httpClient.Timeout = TimeSpan.FromMinutes(5); // Reasoning модели могут работать долго
@@ -143,6 +169,37 @@ public class ReasoningService : IReasoningService
         
         return result?.Response ?? string.Empty;
     }
+
+    /// <summary>
+    /// Вызывает DeepSeek API для reasoning
+    /// </summary>
+    private async Task<string> CallDeepSeekApiAsync(string apiKey, string baseUrl, string model, string prompt)
+    {
+        using var httpClient = new HttpClient();
+        httpClient.Timeout = TimeSpan.FromMinutes(5);
+        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+        
+        var requestBody = new
+        {
+            model = model,
+            messages = new[]
+            {
+                new { role = "user", content = prompt }
+            },
+            temperature = 0.7,
+            max_tokens = 4096
+        };
+        
+        var response = await httpClient.PostAsJsonAsync(
+            $"{baseUrl}/v1/chat/completions", 
+            requestBody);
+        
+        response.EnsureSuccessStatusCode();
+        
+        var result = await response.Content.ReadFromJsonAsync<DeepSeekApiResponse>();
+        
+        return result?.Choices?[0]?.Message?.Content ?? string.Empty;
+    }
 }
 
 /// <summary>
@@ -151,4 +208,22 @@ public class ReasoningService : IReasoningService
 internal class OllamaGenerateResponse
 {
     public string Response { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Модель ответа от DeepSeek API
+/// </summary>
+internal class DeepSeekApiResponse
+{
+    public DeepSeekChoice[]? Choices { get; set; }
+}
+
+internal class DeepSeekChoice
+{
+    public DeepSeekMessage? Message { get; set; }
+}
+
+internal class DeepSeekMessage
+{
+    public string? Content { get; set; }
 }

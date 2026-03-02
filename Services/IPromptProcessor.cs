@@ -7,7 +7,7 @@ public interface IPromptProcessor
     /// <summary>
     /// Получает список доступных инструментов для LLM
     /// </summary>
-    List<CSharpRefactoringAssistant.Models.FunctionDefinition> GetAvailableTools();
+    List<CSharpRefactoringAssistant.Models.FunctionDefinition> GetAvailableTools(string? projectPath = null);
     
     /// <summary>
     /// Выполняет функцию по имени с заданными аргументами

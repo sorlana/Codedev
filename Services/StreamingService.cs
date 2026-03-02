@@ -11,7 +11,7 @@ namespace CSharpRefactoringAssistant.Services;
 /// </summary>
 public class StreamingService : IStreamingService
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IWebSocketManager _webSocketManager;
     private readonly ILogger<StreamingService> _logger;
     
@@ -19,11 +19,11 @@ public class StreamingService : IStreamingService
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeGenerations;
     
     public StreamingService(
-        IServiceProvider serviceProvider,
+        IServiceScopeFactory scopeFactory,
         IWebSocketManager webSocketManager,
         ILogger<StreamingService> logger)
     {
-        _serviceProvider = serviceProvider;
+        _scopeFactory = scopeFactory;
         _webSocketManager = webSocketManager;
         _logger = logger;
         _activeGenerations = new ConcurrentDictionary<string, CancellationTokenSource>();
@@ -65,7 +65,7 @@ public class StreamingService : IStreamingService
                 dialogueId, connectionId, DateTime.UtcNow);
             
             // Создаем новый scope для получения scoped сервисов
-            using var scope = _serviceProvider.CreateScope();
+            using var scope = _scopeFactory.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<RefactoringDbContext>();
             var promptProcessor = scope.ServiceProvider.GetRequiredService<IPromptProcessor>();
             var llmService = scope.ServiceProvider.GetRequiredService<ILlmService>();
@@ -245,8 +245,8 @@ public class StreamingService : IStreamingService
                 }
             });
             
-            // Получаем определения инструментов из PromptProcessor
-            var tools = promptProcessor.GetAvailableTools();
+            // Получаем определения инструментов из PromptProcessor с учетом типа проекта
+            var tools = promptProcessor.GetAvailableTools(projectPath);
             
             // Получаем историю сообщений
             var history = dialogue.Messages
@@ -254,122 +254,122 @@ public class StreamingService : IStreamingService
                 .OrderBy(m => m.Timestamp)
                 .ToList();
             
-            // Проверяем, поддерживает ли LLM сервис streaming И нет ли инструментов
-            // Если есть инструменты, используем обычный API для корректной обработки tool calls
-            if (llmService is IStreamingLlmService streamingLlmService && tools.Count == 0)
+            // Получаем конфигурацию для проверки UseDeepSeekApi
+            var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+            var config = await configService.GetConfigurationAsync();
+            
+            // Проверяем, использовать ли DeepSeek API с оркестратором
+            if (config.UseDeepSeekApi && config.DeepSeek != null && !string.IsNullOrEmpty(config.DeepSeek.ApiKey))
             {
-                // Используем streaming API только если нет инструментов
-                _logger.LogInformation("Используется streaming API для генерации ответа (без инструментов)");
+                _logger.LogInformation("Используется DeepSeek API с оркестратором для потоковой обработки");
                 
-                // Потоковая генерация
-                await foreach (var chunk in streamingLlmService.StreamPromptAsync(
-                    prompt, history, tools, cts.Token))
+                // Получаем оркестратор
+                var orchestrator = scope.ServiceProvider.GetRequiredService<IDeepSeekOrchestratorService>();
+                
+                // Подготавливаем сообщения для оркестратора
+                var messages = new List<object>();
+                
+                // Добавляем системное сообщение
+                var systemMessageContent = @"Ты - AI-ассистент для работы с кодом и файлами на Windows.
+
+КРИТИЧЕСКИ ВАЖНО: 
+- Отвечай ТОЛЬКО на русском языке
+- Вызывай инструменты ТОЛЬКО когда пользователь явно просит выполнить действие с кодом или файлами
+- Для обычного общения (приветствия, вопросы, обсуждения) - просто отвечай текстом БЕЗ вызова инструментов
+
+ПРАВИЛА МНОГОШАГОВОГО ВЫПОЛНЕНИЯ:
+1. Ты можешь вызывать НЕСКОЛЬКО инструментов подряд для выполнения сложной задачи
+2. После каждого вызова инструмента система автоматически вызовет тебя снова с результатом
+3. Анализируй результат и вызывай следующий инструмент если задача не завершена
+4. Когда ВСЕ действия выполнены - дай текстовый ответ БЕЗ вызова инструментов
+
+ПРИМЕР ПРАВИЛЬНОЙ РАБОТЫ:
+Пользователь: ""Прочитай файл hello.txt и добавь в конец строку 'Вторая строка'""
+Шаг 1: Вызываешь read_file для hello.txt
+Шаг 2: Получаешь содержимое ""Привет, мир!"", вызываешь write_file с ""Привет, мир!\nВторая строка""
+Шаг 3: Получаешь подтверждение записи, даешь текстовый ответ: ""✅ Добавлена строка 'Вторая строка' в конец файла hello.txt""
+
+КРИТИЧЕСКИ ВАЖНО:
+- НЕ останавливайся после первого инструмента если задача требует нескольких действий!
+- ВСЕГДА используй read_file перед изменением существующего файла
+- write_file ПЕРЕЗАПИСЫВАЕТ файл полностью (для добавления: read_file → write_file(старое + новое))
+
+Доступные инструменты:
+- execute_shell_command: Выполнение команд Windows
+- read_file: Чтение содержимого файла (ОБЯЗАТЕЛЬНО используй перед изменением!)
+- write_file: Запись/перезапись файла
+- create_file: Создание нового файла
+
+Отвечай на русском языке, параметры инструментов передавай на английском.";
+                
+                messages.Add(new Dictionary<string, object>
                 {
-                    // Проверяем отмену
-                    cts.Token.ThrowIfCancellationRequested();
-                    
-                    // Добавляем фрагмент к полному ответу
-                    fullResponse.Append(chunk);
-                    
-                    // Отправляем фрагмент через WebSocket
-                    await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                    ["role"] = "system",
+                    ["content"] = systemMessageContent
+                });
+                
+                // Добавляем историю диалога
+                foreach (var msg in history)
+                {
+                    messages.Add(new Dictionary<string, object>
                     {
-                        Type = WebSocketMessageTypes.AssistantMessageChunk,
-                        Payload = new MessageChunkPayload
-                        {
-                            DialogueId = dialogueId,
-                            MessageId = messageId,
-                            Content = chunk,
-                            IsComplete = false
-                        }
+                        ["role"] = msg.Role,
+                        ["content"] = msg.Content
                     });
-                    
-                    _logger.LogDebug(
-                        "Отправлен фрагмент: ConnectionId={ConnectionId}, ChunkSize={Size}",
-                        connectionId, chunk.Length);
                 }
-            }
-            else
-            {
-                // Fallback: используем обычный API (если есть инструменты или streaming не поддерживается)
-                _logger.LogInformation("Используется обычный API для генерации ответа (инструментов: {Count})", tools.Count);
                 
-                // Вызываем LLM напрямую
-                var llmResponse = await llmService.SendPromptAsync(prompt, history, tools);
-                
-                // Обрабатываем ответ
-                string responseText;
-                if (llmResponse.FunctionCalls != null && llmResponse.FunctionCalls.Count > 0)
+                // Добавляем текущий промпт пользователя
+                messages.Add(new Dictionary<string, object>
                 {
-                    // Если есть вызовы функций, выполняем их и отправляем результаты в реальном времени
-                    var functionResults = new StringBuilder();
-                    
-                    // Добавляем контекстное сообщение
-                    var firstCall = llmResponse.FunctionCalls.First();
-                    if (firstCall.Name == "execute_shell_command" && firstCall.Arguments.ContainsKey("command"))
+                    ["role"] = "user",
+                    ["content"] = prompt
+                });
+                
+                // Запускаем оркестратор
+                // Преобразуем tools в формат DeepSeek API
+                var deepSeekTools = tools.Select(t => new Dictionary<string, object>
+                {
+                    ["type"] = "function",
+                    ["function"] = new Dictionary<string, object>
                     {
-                        var command = firstCall.Arguments["command"]?.ToString() ?? "";
-                        string contextMessage = "";
-                        
-                        if (command.Contains("del", StringComparison.OrdinalIgnoreCase) || 
-                            command.Contains("rm", StringComparison.OrdinalIgnoreCase))
-                        {
-                            contextMessage = "Удаляю файл...\n\n";
-                        }
-                        else if (command.Contains(">") || command.Contains("echo"))
-                        {
-                            contextMessage = "Создаю файл...\n\n";
-                        }
-                        
-                        if (!string.IsNullOrEmpty(contextMessage))
-                        {
-                            functionResults.Append(contextMessage);
-                            fullResponse.Append(contextMessage);
-                            
-                            // Отправляем контекстное сообщение через WebSocket
-                            await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
-                            {
-                                Type = WebSocketMessageTypes.AssistantMessageChunk,
-                                Payload = new MessageChunkPayload
-                                {
-                                    DialogueId = dialogueId,
-                                    MessageId = null,
-                                    Content = contextMessage,
-                                    IsComplete = false
-                                }
-                            });
-                        }
+                        ["name"] = ((FunctionDefinition)t).Name,
+                        ["description"] = ((FunctionDefinition)t).Description,
+                        ["parameters"] = ((FunctionDefinition)t).Parameters
                     }
-                    
-                    foreach (var functionCall in llmResponse.FunctionCalls)
+                }).Cast<object>().ToList();
+                
+                var orchestratorResult = await orchestrator.ExecuteTurnAsync(
+                    dialogueId,
+                    messages,
+                    deepSeekTools,
+                    async (functionName, argumentsJson) =>
                     {
+                        // Callback для выполнения инструментов с отправкой результатов через WebSocket
                         try
                         {
-                            _logger.LogInformation(
-                                "Выполнение функции {FunctionName} в директории: {ProjectPath}",
-                                functionCall.Name,
-                                projectPath);
+                            _logger.LogInformation("Оркестратор вызывает функцию: {FunctionName}", functionName);
+                            
+                            var arguments = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(argumentsJson);
                             
                             var result = await promptProcessor.ExecuteFunctionAsync(
-                                functionCall.Name,
-                                functionCall.Arguments,
+                                functionName,
+                                arguments ?? new Dictionary<string, object>(),
                                 projectPath);
                             
-                            // Форматируем результат
+                            // Форматируем результат для отображения
                             string formattedResult;
                             if (!string.IsNullOrWhiteSpace(result))
                             {
-                                formattedResult = $"✅ {result}\n";
+                                formattedResult = $"✅ {result}";
                             }
                             else
                             {
-                                formattedResult = "✅ Команда выполнена успешно\n";
+                                formattedResult = "✅ Команда выполнена успешно";
                             }
                             
-                            functionResults.Append(formattedResult);
-                            fullResponse.Append(formattedResult);
+                            fullResponse.Append(formattedResult + "\n");
                             
-                            // Отправляем результат через WebSocket сразу после выполнения
+                            // Отправляем результат через WebSocket
                             await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
                             {
                                 Type = WebSocketMessageTypes.AssistantMessageChunk,
@@ -377,20 +377,26 @@ public class StreamingService : IStreamingService
                                 {
                                     DialogueId = dialogueId,
                                     MessageId = null,
-                                    Content = formattedResult,
+                                    Content = formattedResult + "\n",
                                     IsComplete = false
                                 }
                             });
+                            
+                            // Ограничиваем размер результата для передачи в модель
+                            var truncatedResult = result != null && result.Length > 2000 
+                                ? result.Substring(0, 2000) + "\n... (результат обрезан)" 
+                                : result ?? "";
+                            
+                            return truncatedResult;
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogError(ex, "Ошибка выполнения функции {FunctionName}", functionCall.Name);
+                            _logger.LogError(ex, "Ошибка выполнения функции {FunctionName}", functionName);
                             
-                            var errorMessage = $"❌ Ошибка: {ex.Message}\n";
-                            functionResults.Append(errorMessage);
-                            fullResponse.Append(errorMessage);
+                            var errorMessage = $"❌ Ошибка: {ex.Message}";
+                            fullResponse.Append(errorMessage + "\n");
                             
-                            // Отправляем сообщение об ошибке через WebSocket
+                            // Отправляем ошибку через WebSocket
                             await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
                             {
                                 Type = WebSocketMessageTypes.AssistantMessageChunk,
@@ -398,18 +404,28 @@ public class StreamingService : IStreamingService
                                 {
                                     DialogueId = dialogueId,
                                     MessageId = null,
-                                    Content = errorMessage,
+                                    Content = errorMessage + "\n",
                                     IsComplete = false
                                 }
                             });
+                            
+                            return errorMessage;
                         }
-                    }
+                    },
+                    maxSubTurns: 10);
+                
+                if (!orchestratorResult.Success)
+                {
+                    throw new Exception($"Ошибка оркестратора: {orchestratorResult.ErrorMessage}");
+                }
+                
+                // Добавляем финальный ответ модели
+                var finalAnswer = orchestratorResult.FinalAnswer;
+                if (!string.IsNullOrWhiteSpace(finalAnswer))
+                {
+                    fullResponse.Append(finalAnswer);
                     
-                    var finalMessage = "\nГотово! Операция выполнена успешно.\n";
-                    functionResults.Append(finalMessage);
-                    fullResponse.Append(finalMessage);
-                    
-                    // Отправляем финальное сообщение через WebSocket
+                    // Отправляем финальный ответ через WebSocket
                     await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
                     {
                         Type = WebSocketMessageTypes.AssistantMessageChunk,
@@ -417,32 +433,210 @@ public class StreamingService : IStreamingService
                         {
                             DialogueId = dialogueId,
                             MessageId = null,
-                            Content = finalMessage,
+                            Content = finalAnswer,
                             IsComplete = false
                         }
                     });
+                }
+                
+                _logger.LogInformation("Оркестратор завершил работу. Выполнено суб-запросов: {SubTurns}", 
+                    orchestratorResult.SubTurnsExecuted);
+            }
+            else
+            {
+                // Старая логика для Ollama и других провайдеров
+                _logger.LogInformation("Используется стандартный LLM сервис (не DeepSeek API)");
+                
+                // Проверяем, поддерживает ли LLM сервис streaming И нет ли инструментов
+                // Если есть инструменты, используем обычный API для корректной обработки tool calls
+                if (llmService is IStreamingLlmService streamingLlmService && tools.Count == 0)
+                {
+                    // Используется streaming API только если нет инструментов
+                    _logger.LogInformation("Используется streaming API для генерации ответа (без инструментов)");
                     
-                    responseText = functionResults.ToString();
+                    // Потоковая генерация
+                    await foreach (var chunk in streamingLlmService.StreamPromptAsync(
+                        prompt, history, tools, cts.Token))
+                    {
+                        // Проверяем отмену
+                        cts.Token.ThrowIfCancellationRequested();
+                        
+                        // Добавляем фрагмент к полному ответу
+                        fullResponse.Append(chunk);
+                        
+                        // Отправляем фрагмент через WebSocket
+                        await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                        {
+                            Type = WebSocketMessageTypes.AssistantMessageChunk,
+                            Payload = new MessageChunkPayload
+                            {
+                                DialogueId = dialogueId,
+                                MessageId = messageId,
+                                Content = chunk,
+                                IsComplete = false
+                            }
+                        });
+                        
+                        _logger.LogDebug(
+                            "Отправлен фрагмент: ConnectionId={ConnectionId}, ChunkSize={Size}",
+                            connectionId, chunk.Length);
+                    }
                 }
                 else
                 {
-                    responseText = llmResponse.TextContent ?? string.Empty;
-                    fullResponse.Append(responseText);
+                    // Fallback: используем обычный API (если есть инструменты или streaming не поддерживается)
+                    _logger.LogInformation("Используется обычный API для генерации ответа (инструментов: {Count})", tools.Count);
                     
-                    // Отправляем текстовый ответ через WebSocket
-                    await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                    // Вызываем LLM напрямую
+                    var llmResponse = await llmService.SendPromptAsync(prompt, history, tools);
+                    
+                    // Обрабатываем ответ
+                    string responseText;
+                    if (llmResponse.FunctionCalls != null && llmResponse.FunctionCalls.Count > 0)
                     {
-                        Type = WebSocketMessageTypes.AssistantMessageChunk,
-                        Payload = new MessageChunkPayload
+                        // Если есть вызовы функций, выполняем их и отправляем результаты в реальном времени
+                        var functionResults = new StringBuilder();
+                        
+                        // Добавляем контекстное сообщение
+                        var firstCall = llmResponse.FunctionCalls.First();
+                        if (firstCall.Name == "execute_shell_command" && firstCall.Arguments.ContainsKey("command"))
                         {
-                            DialogueId = dialogueId,
-                            MessageId = null,
-                            Content = responseText,
-                            IsComplete = false
+                            var command = firstCall.Arguments["command"]?.ToString() ?? "";
+                            string contextMessage = "";
+                            
+                            if (command.Contains("del", StringComparison.OrdinalIgnoreCase) || 
+                                command.Contains("rm", StringComparison.OrdinalIgnoreCase))
+                            {
+                                contextMessage = "Удаляю файл...\n\n";
+                            }
+                            else if (command.Contains(">") || command.Contains("echo"))
+                            {
+                                contextMessage = "Создаю файл...\n\n";
+                            }
+                            
+                            if (!string.IsNullOrEmpty(contextMessage))
+                            {
+                                functionResults.Append(contextMessage);
+                                fullResponse.Append(contextMessage);
+                                
+                                // Отправляем контекстное сообщение через WebSocket
+                                await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                                {
+                                    Type = WebSocketMessageTypes.AssistantMessageChunk,
+                                    Payload = new MessageChunkPayload
+                                    {
+                                        DialogueId = dialogueId,
+                                        MessageId = null,
+                                        Content = contextMessage,
+                                        IsComplete = false
+                                    }
+                                });
+                            }
                         }
-                    });
+                        
+                        foreach (var functionCall in llmResponse.FunctionCalls)
+                        {
+                            try
+                            {
+                                _logger.LogInformation(
+                                    "Выполнение функции {FunctionName} в директории: {ProjectPath}",
+                                    functionCall.Name,
+                                    projectPath);
+                                
+                                var result = await promptProcessor.ExecuteFunctionAsync(
+                                    functionCall.Name,
+                                    functionCall.Arguments,
+                                    projectPath);
+                                
+                                // Форматируем результат
+                                string formattedResult;
+                                if (!string.IsNullOrWhiteSpace(result))
+                                {
+                                    formattedResult = $"✅ {result}\n";
+                                }
+                                else
+                                {
+                                    formattedResult = "✅ Команда выполнена успешно\n";
+                                }
+                                
+                                functionResults.Append(formattedResult);
+                                fullResponse.Append(formattedResult);
+                                
+                                // Отправляем результат через WebSocket сразу после выполнения
+                                await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                                {
+                                    Type = WebSocketMessageTypes.AssistantMessageChunk,
+                                    Payload = new MessageChunkPayload
+                                    {
+                                        DialogueId = dialogueId,
+                                        MessageId = null,
+                                        Content = formattedResult,
+                                        IsComplete = false
+                                    }
+                                });
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Ошибка выполнения функции {FunctionName}", functionCall.Name);
+                                
+                                var errorMessage = $"❌ Ошибка: {ex.Message}\n";
+                                functionResults.Append(errorMessage);
+                                fullResponse.Append(errorMessage);
+                                
+                                // Отправляем сообщение об ошибке через WebSocket
+                                await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                                {
+                                    Type = WebSocketMessageTypes.AssistantMessageChunk,
+                                    Payload = new MessageChunkPayload
+                                    {
+                                        DialogueId = dialogueId,
+                                        MessageId = null,
+                                        Content = errorMessage,
+                                        IsComplete = false
+                                    }
+                                });
+                            }
+                        }
+                        
+                        var finalMessage = "\nГотово! Операция выполнена успешно.\n";
+                        functionResults.Append(finalMessage);
+                        fullResponse.Append(finalMessage);
+                        
+                        // Отправляем финальное сообщение через WebSocket
+                        await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                        {
+                            Type = WebSocketMessageTypes.AssistantMessageChunk,
+                            Payload = new MessageChunkPayload
+                            {
+                                DialogueId = dialogueId,
+                                MessageId = null,
+                                Content = finalMessage,
+                                IsComplete = false
+                            }
+                        });
+                        
+                        responseText = functionResults.ToString();
+                    }
+                    else
+                    {
+                        responseText = llmResponse.TextContent ?? string.Empty;
+                        fullResponse.Append(responseText);
+                        
+                        // Отправляем текстовый ответ через WebSocket
+                        await _webSocketManager.SendMessageAsync(connectionId, new WebSocketMessage
+                        {
+                            Type = WebSocketMessageTypes.AssistantMessageChunk,
+                            Payload = new MessageChunkPayload
+                            {
+                                DialogueId = dialogueId,
+                                MessageId = null,
+                                Content = responseText,
+                                IsComplete = false
+                            }
+                        });
+                    }
                 }
-            }
+            } // Конец блока else (стандартный LLM)
             
             // Сохраняем завершенное сообщение ассистента в базу данных
             var assistantMessage = new Message
@@ -486,7 +680,7 @@ public class StreamingService : IStreamingService
             if (fullResponse.Length > 0)
             {
                 // Создаем новый scope для сохранения частичного ответа
-                using var scope = _serviceProvider.CreateScope();
+                using var scope = _scopeFactory.CreateScope();
                 var dbContext = scope.ServiceProvider.GetRequiredService<RefactoringDbContext>();
                 
                 var partialMessage = new Message
@@ -524,7 +718,7 @@ public class StreamingService : IStreamingService
                 dialogueId, connectionId);
             
             // Создаем новый scope для сохранения сообщения об ошибке
-            using var scope = _serviceProvider.CreateScope();
+            using var scope = _scopeFactory.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<RefactoringDbContext>();
             
             // Сохраняем частичный ответ с сообщением об ошибке
@@ -606,6 +800,77 @@ public class StreamingService : IStreamingService
             _logger.LogError(ex,
                 "Ошибка при отмене генерации: ConnectionId={ConnectionId}",
                 connectionId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Отправляет готовый ответ в чат через streaming
+    /// </summary>
+    public async Task StreamResponseAsync(int dialogueId, string message)
+    {
+        try
+        {
+            _logger.LogInformation("Отправка готового ответа в диалог {DialogueId}", dialogueId);
+
+            // Отправляем начало сообщения
+            await _webSocketManager.BroadcastToDialogueAsync(dialogueId, new WebSocketMessage
+            {
+                Type = WebSocketMessageTypes.AssistantMessageStart,
+                Payload = new MessageChunkPayload
+                {
+                    DialogueId = dialogueId,
+                    Content = "",
+                    IsComplete = false
+                }
+            });
+
+            // Отправляем содержимое
+            await _webSocketManager.BroadcastToDialogueAsync(dialogueId, new WebSocketMessage
+            {
+                Type = WebSocketMessageTypes.AssistantMessageChunk,
+                Payload = new MessageChunkPayload
+                {
+                    DialogueId = dialogueId,
+                    Content = message,
+                    IsComplete = false
+                }
+            });
+
+            // Создаем новый scope для сохранения сообщения
+            using var scope = _scopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<RefactoringDbContext>();
+            
+            // Сохраняем сообщение в БД
+            var assistantMessage = new Message
+            {
+                DialogueId = dialogueId,
+                Role = "assistant",
+                Content = message,
+                Timestamp = DateTime.UtcNow
+            };
+
+            dbContext.Messages.Add(assistantMessage);
+            await dbContext.SaveChangesAsync();
+
+            // Отправляем завершение
+            await _webSocketManager.BroadcastToDialogueAsync(dialogueId, new WebSocketMessage
+            {
+                Type = WebSocketMessageTypes.AssistantMessageEnd,
+                Payload = new MessageChunkPayload
+                {
+                    DialogueId = dialogueId,
+                    MessageId = assistantMessage.Id,
+                    Content = message,
+                    IsComplete = true
+                }
+            });
+
+            _logger.LogInformation("Готовый ответ успешно отправлен в диалог {DialogueId}", dialogueId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Ошибка отправки готового ответа в диалог {DialogueId}", dialogueId);
             throw;
         }
     }

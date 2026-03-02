@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>C# Refactoring Assistant</title>
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <!-- Material Icons -->
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
@@ -115,6 +117,11 @@
             height: 100%;
             min-height: 0;
         }
+        
+        /* Когда панель задач открыта, показываем её между sidebar и main-content */
+        #app.with-task-panel {
+            /* Flexbox автоматически расположит элементы в порядке их появления в DOM */
+        }
 
         #sidebar {
             width: 300px;
@@ -122,6 +129,7 @@
             border-right: 1px solid #ddd;
             display: flex;
             flex-direction: column;
+            flex-shrink: 0;
         }
 
         #sidebar-header {
@@ -428,6 +436,25 @@
             color: #dc3545;
         }
 
+        .group-action-btn.run {
+            color: #28a745;
+        }
+
+        .group-action-btn.run:hover:not(:disabled) {
+            background: rgba(40, 167, 69, 0.1);
+            color: #28a745;
+        }
+
+        .group-action-btn.run.completed {
+            color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .group-action-btn.run:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         .dialogue-group-content {
             display: block;
         }
@@ -713,6 +740,52 @@
         #start-reasoning-model-button:disabled {
             background: #6c757d;
             cursor: not-allowed;
+        }
+
+        /* Стили для toggle переключателя */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: #007bff;
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(20px);
         }
 
         /* Стили для поиска по сообщениям */
@@ -1194,6 +1267,343 @@
         .message.partial .message-role {
             color: #856404;
         }
+
+        /* Стили панели задач */
+        #task-panel {
+            width: 400px;
+            background: #f8f9fa;
+            border-right: 1px solid #ddd;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        
+        #app.with-task-panel #task-panel {
+            display: flex;
+        }
+
+        .task-panel-header {
+            padding: 20px;
+            border-bottom: 1px solid #ddd;
+            background: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .task-panel-header h2 {
+            font-size: 18px;
+            margin: 0;
+        }
+
+        .task-panel-header button {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            color: #666;
+            padding: 4px;
+        }
+
+        .task-panel-header button:hover {
+            color: #dc3545;
+        }
+
+        .task-panel-controls {
+            padding: 15px 20px;
+            border-bottom: 1px solid #ddd;
+            background: white;
+        }
+
+        .execute-all-btn {
+            width: 100%;
+            padding: 12px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .execute-all-btn:hover {
+            background: #218838;
+        }
+
+        .execute-all-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .task-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+
+        .task-item {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+
+        .task-header {
+            padding: 12px 15px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .task-header:hover {
+            background: #e9ecef;
+        }
+
+        .task-title {
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .task-status-icon {
+            font-size: 16px;
+        }
+
+        .task-status-pending { color: #6c757d; }
+        .task-status-running { color: #007bff; }
+        .task-status-completed { color: #28a745; }
+        .task-status-failed { color: #dc3545; }
+        .task-status-stopped { color: #ffc107; }
+
+        .task-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .task-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .task-btn-run {
+            background: #28a745;
+            color: white;
+        }
+
+        .task-btn-run:hover {
+            background: #218838;
+        }
+
+        .task-btn-stop {
+            background: #dc3545;
+            color: white;
+        }
+
+        .task-btn-stop:hover {
+            background: #c82333;
+        }
+
+        .task-loader {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .task-content {
+            padding: 15px;
+            display: none;
+        }
+
+        .task-content.expanded {
+            display: block;
+        }
+
+        .task-description {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+
+        .task-folders {
+            margin-bottom: 12px;
+        }
+
+        .task-folders-title {
+            font-weight: 500;
+            font-size: 13px;
+            margin-bottom: 6px;
+            color: #495057;
+        }
+
+        .task-folders-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .folder-tag {
+            background: #e9ecef;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            color: #495057;
+        }
+
+        .subtask-list {
+            margin-top: 12px;
+        }
+
+        .subtask-item {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+
+        .subtask-header {
+            padding: 8px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .subtask-header:hover {
+            background: #e9ecef;
+        }
+
+        .subtask-title {
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .subtask-code {
+            padding: 12px;
+            background: #282c34;
+            color: #abb2bf;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+            display: none;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .subtask-code.expanded {
+            display: block;
+        }
+
+        /* Стили для дерева папок */
+        .folder-tree {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #333;
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 4px;
+            margin-top: 8px;
+            overflow-x: auto;
+        }
+
+        .folder-tree-item {
+            white-space: pre;
+            color: #495057;
+        }
+
+        #tasks-button {
+            padding: 12px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-width: 44px;
+            height: 44px;
+        }
+
+        #tasks-button:hover {
+            background: #0056b3;
+        }
+
+        #execute-tasks-button {
+            padding: 12px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-width: 44px;
+            height: 44px;
+        }
+
+        #execute-tasks-button:hover {
+            background: #218838;
+        }
+
+        #execute-tasks-button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        #delete-plan-button {
+            padding: 12px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-width: 44px;
+            height: 44px;
+        }
+
+        #delete-plan-button:hover {
+            background: #c82333;
+        }
     </style>
 </head>
 <body>
@@ -1219,6 +1629,24 @@
             </div>
             <div id="dialogue-list"></div>
         </div>
+        
+        <!-- Панель задач (скрыта по умолчанию, между sidebar и main-content) -->
+        <div id="task-panel">
+            <div class="task-panel-header">
+                <h2>План задач</h2>
+                <button id="close-task-panel-btn" onclick="closeTaskPanel()">
+                    <span class="material-icons">close</span>
+                </button>
+            </div>
+            <div class="task-panel-controls">
+                <button id="execute-all-tasks-btn" class="execute-all-btn" onclick="executeAllTasks()">
+                    <span class="material-icons">play_arrow</span> Запустить все задачи
+                </button>
+            </div>
+            <div id="task-list" class="task-list">
+                <!-- Задачи будут добавлены динамически -->
+            </div>
+        </div>
 
         <div id="main-content">
             <div id="dialogue-view">
@@ -1243,6 +1671,15 @@
                         <span class="reasoning-model-status-icon" title="Проверка reasoning модели...">●</span>
                         <span class="reasoning-model-status-label">Reasoning модель</span>
                         <button id="start-reasoning-model-button" onclick="startReasoningModel()" style="display: none; padding: 4px 12px; font-size: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 8px;">🚀 Запустить</button>
+                    </div>
+                    
+                    <!-- Toggle для DeepSeek API -->
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label class="toggle-switch" title="Использовать DeepSeek API вместо локальной модели">
+                            <input type="checkbox" id="deepseek-api-toggle" onchange="toggleDeepSeekApi()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span style="font-size: 12px; color: #666;">DeepSeek API</span>
                     </div>
                 </div>
                 
@@ -1282,6 +1719,13 @@
                     <div id="message-input-row">
                         <input type="text" id="prompt-input" placeholder="Введите команду для вашего проекта (например: Покажи файл Program.cs)...">
                         <button id="send-button">Отправить</button>
+                    </div>
+                        <button id="execute-tasks-button" style="display: none;" title="Выполнить задачи напрямую через DeepSeek API">
+                            <span class="material-icons">play_circle</span>
+                        </button>
+                        <button id="delete-plan-button" style="display: none;" title="Удалить план задач">
+                            <span class="material-icons">delete</span>
+                        </button>
                     </div>
                 </div>
             </div>

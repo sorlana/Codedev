@@ -20,6 +20,13 @@ public interface IStreamingService
         CancellationToken cancellationToken);
     
     /// <summary>
+    /// Отправляет готовый ответ в чат через streaming
+    /// </summary>
+    /// <param name="dialogueId">ID диалога</param>
+    /// <param name="message">Текст сообщения</param>
+    Task StreamResponseAsync(int dialogueId, string message);
+    
+    /// <summary>
     /// Отменяет текущую генерацию ответа для указанного соединения
     /// </summary>
     /// <param name="connectionId">Уникальный идентификатор WebSocket соединения</param>

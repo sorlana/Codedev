@@ -41,3 +41,10 @@ public record UpdateDialogueGroupContextRequest(
 public record UpdateDialogueGroupRequest(string Name, bool IsCollapsed);
 
 public record CreateDialogueInGroupRequest(int GroupId);
+
+// DTO для автоматического планирования и выполнения задач
+public record PlanTasksRequest(int DialogueId);
+
+public record ExecuteTaskRequest(int DialogueId, string PlanId, int TaskId);
+
+public record StopTaskRequest(string PlanId, int TaskId);

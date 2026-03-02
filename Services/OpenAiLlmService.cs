@@ -18,6 +18,7 @@ public class OpenAiLlmService : ILlmService, IStreamingLlmService
         ILogger<OpenAiLlmService> logger)
     {
         _httpClient = httpClient;
+        _httpClient.Timeout = TimeSpan.FromMinutes(10); // Увеличенный таймаут для генерации детальных планов
         _logger = logger;
         _apiKey = configuration["Llm:OpenAI:ApiKey"] ?? throw new ArgumentException("OpenAI API key not configured");
         _model = configuration["Llm:OpenAI:Model"] ?? "deepseek-chat";
@@ -27,7 +28,8 @@ public class OpenAiLlmService : ILlmService, IStreamingLlmService
     public async Task<LlmResponse> SendPromptAsync(
         string prompt,
         List<Message> history,
-        List<FunctionDefinition> tools)
+        List<FunctionDefinition> tools,
+        bool forceJson = false)
     {
         try
         {
@@ -54,6 +56,7 @@ public class OpenAiLlmService : ILlmService, IStreamingLlmService
             {
                 model = _model,
                 messages = messages,
+                response_format = forceJson ? new { type = "json_object" } : null,
                 tools = tools.Select(t => new
                 {
                     type = "function",
@@ -66,7 +69,10 @@ public class OpenAiLlmService : ILlmService, IStreamingLlmService
                 }).ToArray()
             };
 
-            var requestJson = JsonSerializer.Serialize(requestBody);
+            var requestJson = JsonSerializer.Serialize(requestBody, new JsonSerializerOptions
+            {
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            });
             var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
             _httpClient.DefaultRequestHeaders.Clear();

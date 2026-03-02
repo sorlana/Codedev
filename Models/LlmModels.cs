@@ -14,6 +14,7 @@ public class FunctionCall
 
 public class FunctionDefinition
 {
+    public string Type { get; set; } = "function"; // Для DeepSeek API
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public Dictionary<string, object> Parameters { get; set; } = new();

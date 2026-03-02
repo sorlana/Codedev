@@ -4,7 +4,7 @@ namespace CSharpRefactoringAssistant.Services;
 
 public interface ILlmService
 {
-    Task<LlmResponse> SendPromptAsync(string prompt, List<Message> history, List<FunctionDefinition> tools);
+    Task<LlmResponse> SendPromptAsync(string prompt, List<Message> history, List<FunctionDefinition> tools, bool forceJson = false);
     
     // Потоковая передача ответа LLM по частям
     IAsyncEnumerable<string> StreamPromptAsync(

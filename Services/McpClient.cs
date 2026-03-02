@@ -7,15 +7,11 @@ namespace CSharpRefactoringAssistant.Services;
 
 public class McpClient : IMcpClient
 {
-    private Process? _serenaProcess;
-    private StreamWriter? _stdin;
-    private StreamReader? _stdout;
-    private int _requestId = 0;
     private readonly string _command;
     private readonly string[] _args;
     private readonly ILogger<McpClient> _logger;
 
-    public bool IsConnected => _serenaProcess != null && !_serenaProcess.HasExited;
+    public bool IsConnected => true; // Всегда "подключен" так как создаем процесс по требованию
 
     public McpClient(IConfiguration configuration, ILogger<McpClient> logger)
     {
@@ -27,10 +23,53 @@ public class McpClient : IMcpClient
             : Array.Empty<string>();
     }
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync()
+    {
+        // Инициализация не требуется - создаем процесс для каждого вызова
+        _logger.LogInformation("MCP Client ready (process-per-call mode)");
+        return Task.CompletedTask;
+    }
+
+    public async Task<McpResponse> CallToolAsync(string toolName, Dictionary<string, object> parameters)
     {
         try
         {
+            _logger.LogInformation("Calling MCP tool: {ToolName}", toolName);
+
+            // Создаем два JSON-RPC запроса: initialize и tool call
+            var initRequest = new
+            {
+                jsonrpc = "2.0",
+                id = 1,
+                method = "initialize",
+                @params = new
+                {
+                    protocolVersion = "2024-11-05",
+                    capabilities = new { },
+                    clientInfo = new
+                    {
+                        name = "CSharpRefactoringAssistant",
+                        version = "1.0.0"
+                    }
+                }
+            };
+
+            var toolRequest = new
+            {
+                jsonrpc = "2.0",
+                id = 2,
+                method = "tools/call",
+                @params = new
+                {
+                    name = toolName,
+                    arguments = parameters
+                }
+            };
+
+            // Объединяем оба запроса в один ввод (каждый на отдельной строке)
+            var input = JsonSerializer.Serialize(initRequest) + "\n" + JsonSerializer.Serialize(toolRequest);
+
+            // Создаем процесс для этого вызова
             var processStartInfo = new ProcessStartInfo
             {
                 FileName = _command,
@@ -42,51 +81,68 @@ public class McpClient : IMcpClient
                 CreateNoWindow = true
             };
 
-            _serenaProcess = Process.Start(processStartInfo);
-            if (_serenaProcess == null)
+            using var process = Process.Start(processStartInfo);
+            if (process == null)
                 throw new McpException("Failed to start Serena process");
 
-            _stdin = _serenaProcess.StandardInput;
-            _stdout = _serenaProcess.StandardOutput;
+            // Отправляем оба запроса сразу
+            await process.StandardInput.WriteAsync(input);
+            await process.StandardInput.FlushAsync();
+            process.StandardInput.Close();
 
-            _logger.LogInformation("MCP Client initialized successfully");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to initialize MCP Client");
-            throw new McpException("Failed to initialize MCP Client", ex);
-        }
-    }
-
-    public async Task<McpResponse> CallToolAsync(string toolName, Dictionary<string, object> parameters)
-    {
-        if (!IsConnected)
-            throw new McpException("MCP Client is not connected");
-
-        try
-        {
-            var requestId = Interlocked.Increment(ref _requestId);
-            var request = new
+            // Читаем весь вывод с таймаутом
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            
+            var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+            var errorTask = process.StandardError.ReadToEndAsync(cts.Token);
+            
+            try
             {
-                jsonrpc = "2.0",
-                id = requestId,
-                method = "tools/call",
-                @params = new
+                await Task.WhenAll(outputTask, errorTask);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogError("MCP tool call timed out after 30 seconds: {ToolName}", toolName);
+                process.Kill(true);
+                throw new McpException($"MCP tool call timed out: {toolName}");
+            }
+
+            var output = await outputTask;
+            var errorOutput = await errorTask;
+
+            // Ждем завершения процесса с таймаутом
+            if (!process.WaitForExit(5000))
+            {
+                _logger.LogWarning("Process did not exit in time, killing it");
+                process.Kill(true);
+            }
+
+            _logger.LogDebug("Process exited with code: {ExitCode}", process.ExitCode);
+
+            // Ищем JSON ответы в выводе (пропускаем INFO логи)
+            var lines = output.Split('\n');
+            string? toolResponse = null;
+
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("{") && trimmed.Contains("\"id\":2"))
                 {
-                    name = toolName,
-                    arguments = parameters
+                    toolResponse = trimmed;
+                    break;
                 }
-            };
+            }
 
-            var requestJson = JsonSerializer.Serialize(request);
-            await _stdin!.WriteLineAsync(requestJson);
-            await _stdin.FlushAsync();
+            if (toolResponse == null)
+            {
+                _logger.LogError("No tool response found. Output: {Output}", output.Length > 500 ? output.Substring(0, 500) : output);
+                throw new McpException($"No response from tool: {toolName}");
+            }
 
-            var responseJson = await _stdout!.ReadLineAsync();
-            if (string.IsNullOrEmpty(responseJson))
-                throw new McpException("Empty response from Serena");
+            _logger.LogDebug("Tool response received");
 
-            var response = JsonSerializer.Deserialize<JsonElement>(responseJson);
+            // Парсим ответ
+            var response = JsonSerializer.Deserialize<JsonElement>(toolResponse);
             
             if (response.TryGetProperty("error", out var error))
             {
@@ -115,36 +171,11 @@ public class McpClient : IMcpClient
         }
     }
 
-    public async Task ShutdownAsync()
+    public Task ShutdownAsync()
     {
-        try
-        {
-            if (_stdin != null)
-            {
-                await _stdin.DisposeAsync();
-                _stdin = null;
-            }
-
-            if (_stdout != null)
-            {
-                _stdout.Dispose();
-                _stdout = null;
-            }
-
-            if (_serenaProcess != null && !_serenaProcess.HasExited)
-            {
-                _serenaProcess.Kill();
-                await _serenaProcess.WaitForExitAsync();
-                _serenaProcess.Dispose();
-                _serenaProcess = null;
-            }
-
-            _logger.LogInformation("MCP Client shut down successfully");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error shutting down MCP Client");
-        }
+        // Ничего не нужно делать - процессы создаются и завершаются для каждого вызова
+        _logger.LogInformation("MCP Client shutdown (no-op in process-per-call mode)");
+        return Task.CompletedTask;
     }
 }
 
